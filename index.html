@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Energy Check — Ipoh Hydrotech</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#16213e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Energy Check">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+:root{
+  --bg:#1a1a2e; --card:#16213e; --raise:#0f3460; --field:#0e1730; --line:#3a4a6b;
+  --ink:#f2f4f8; --muted:#a9b3c6; --red:#e94560; --red-d:#c9304a; --ok:#4cd28a; --warn:#ffb454;
+  --r:12px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg);min-height:100vh;overflow-wrap:anywhere}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+h2,h3,p{margin:0}
+[hidden]{display:none!important}
+
+header{position:sticky;top:0;z-index:20;background:var(--card);border-bottom:2px solid var(--raise);padding-top:env(safe-area-inset-top)}
+.hrow{display:flex;align-items:center;gap:6px;min-height:56px;padding:0 8px}
+.hrow h1{flex:1;min-width:0;margin:0;font-size:17px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hrow h1.brand{color:var(--red);padding-left:8px}
+.hback{width:44px;height:44px;flex:none;border:0;background:none;font-size:26px;line-height:1;border-radius:10px}
+.saved{flex:none;font-size:12px;color:var(--ok);padding-right:8px}
+.saved.busy{color:var(--muted)}
+.tabs{display:grid;grid-template-columns:repeat(5,1fr)}
+.tab{min-height:46px;border:0;border-bottom:3px solid transparent;background:none;color:var(--muted);font-size:13px;font-weight:600;padding:4px 0}
+.tab.on{color:var(--ink);border-bottom-color:var(--red)}
+.tab .tick{color:var(--ok);margin-left:2px}
+
+main{padding:12px;padding-bottom:calc(96px + env(safe-area-inset-bottom));max-width:720px;margin:0 auto}
+.card{background:var(--card);border-radius:var(--r);padding:14px;margin-bottom:12px}
+.card>h2{font-size:15px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.card>h2::before{content:"";width:4px;height:16px;border-radius:2px;background:var(--red)}
+.note{font-size:13px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.f{min-width:0;display:flex;flex-direction:column}
+.f.full{grid-column:1/-1}
+.f label,.f .lbl{display:block;font-size:13px;color:var(--muted);margin-bottom:5px;font-weight:600;flex:1}
+input.in,select.in,textarea.in{width:100%;min-height:48px;padding:10px 12px;background:var(--field);border:1px solid var(--line);border-radius:10px;font-size:16px;outline:none;appearance:none;-webkit-appearance:none}
+input[type=date].in{min-width:0}
+textarea.in{min-height:130px;resize:vertical}
+.in:focus{border-color:var(--red);box-shadow:0 0 0 2px rgba(233,69,96,.3)}
+.withbtn{display:flex;gap:6px}
+.withbtn .in{flex:1;min-width:0}
+.sign{flex:none;width:48px;border:1px solid var(--line);border-radius:10px;background:var(--raise);font-size:18px}
+.readout{min-height:48px;padding:12px;border:1px dashed var(--line);border-radius:10px;font-weight:700}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg button{flex:1 1 40%;min-height:48px;padding:6px;border:1px solid var(--line);border-radius:10px;background:var(--field);font-weight:600;font-size:15px}
+.seg button[aria-pressed=true]{background:var(--red);border-color:var(--red);color:#fff}
+
+.slot{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.slot .top{display:flex;justify-content:space-between;gap:8px;font-size:14px;font-weight:600;margin-bottom:8px}
+.slot .need{color:var(--warn);font-size:12px;font-weight:600;flex:none}
+.slot .got{color:var(--ok);font-size:12px;font-weight:600;flex:none}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;margin-bottom:8px}
+.thumbs:empty{display:none}
+.thumbs button{padding:0;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#000;aspect-ratio:1}
+.thumbs img{display:block;width:100%;height:100%;object-fit:cover}
+.pick{display:grid;grid-template-columns:2fr 1fr;gap:8px}
+.pick label{position:relative;display:flex;align-items:center;justify-content:center;gap:6px;min-height:48px;border:1px solid var(--line);border-radius:10px;background:var(--raise);font-weight:600;font-size:15px;cursor:pointer;text-align:center}
+.pick input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+
+.btn{display:block;width:100%;min-height:50px;padding:10px 14px;border:0;border-radius:10px;background:var(--raise);font-weight:700;text-align:center;position:relative}
+.btn.primary{background:var(--red);color:#fff}
+.btn.ghost{background:none;border:1px solid var(--line)}
+.btn.danger{background:none;border:1px solid var(--red);color:#ff8a9d}
+.btn input{position:absolute;inset:0;opacity:0;width:100%;height:100%}
+.btn+.btn,.btn+label.btn{margin-top:8px}
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card);border-top:2px solid var(--raise);padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
+.bar .in2{display:grid;grid-template-columns:1fr 2fr;gap:8px;max-width:696px;margin:0 auto}
+
+.list{display:flex;flex-direction:column;gap:10px;margin-bottom:12px}
+.item{display:flex;align-items:stretch;background:var(--card);border-radius:var(--r);overflow:hidden}
+.item .main{flex:1;min-width:0;padding:13px 14px;border:0;background:none;text-align:left}
+.item .t{font-weight:700;font-size:16px}
+.item .s{font-size:13px;color:var(--muted);margin-top:2px}
+.item .side{display:flex;flex-direction:column;border-left:1px solid var(--line)}
+.item .side button{flex:1;min-height:44px;min-width:64px;border:0;background:none;font-size:13px;color:var(--muted);font-weight:600}
+.item .side button+button{border-top:1px solid var(--line)}
+.pill{display:inline-block;margin-top:6px;font-size:12px;font-weight:700;padding:2px 8px;border-radius:99px;background:rgba(255,180,84,.16);color:var(--warn)}
+.pill.ok{background:rgba(76,210,138,.15);color:var(--ok)}
+.empty{text-align:center;color:var(--muted);padding:34px 16px}
+
+.check{display:grid;gap:8px}
+.check div{display:flex;justify-content:space-between;gap:12px;font-size:14px}
+.check b{white-space:nowrap}
+.check .warn{color:var(--warn)}
+.miss{margin:0;padding-left:18px;font-size:14px;color:var(--warn)}
+.sigpad{display:block;width:100%;height:130px;background:#fff;border-radius:10px;touch-action:none}
+
+.overlay{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.92);display:flex;flex-direction:column;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.overlay .cap{padding:12px 14px;font-weight:600}
+.overlay .pic{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+.overlay img{max-width:100%;max-height:100%}
+.overlay .acts{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 12px}
+.sheetwrap{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.65);display:flex;align-items:flex-end;justify-content:center}
+.sheet{width:100%;max-width:720px;background:var(--card);border-radius:16px 16px 0 0;padding:18px 14px calc(16px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}
+.sheet h3{font-size:17px;margin-bottom:6px}
+.sheet .note{margin-bottom:12px}
+#toast{position:fixed;left:50%;bottom:calc(92px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:60;background:#000;color:#fff;padding:10px 16px;border-radius:99px;font-size:14px;max-width:90vw;text-align:center;pointer-events:none}
+.spin{width:30px;height:30px;margin:6px auto 12px;border:3px solid var(--line);border-top-color:var(--red);border-radius:50%;animation:s 1s linear infinite}
+@keyframes s{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:3s}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" hidden></div>
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script>
+'use strict';
+/* ========== Checklist definition ==========
+   One place drives the form, the "missing" list, the PDF and the export.
+   extra:true marks fields that are not on the paper checklist.
+   fresh:true marks site readings that "Copy" must not carry to the next pump. */
+const F = {
+  location:{l:'Energy Check Location',full:1},
+  pumpName:{l:'Pump Name / ID (by Client)',full:1,key:1,fresh:1},
+  qty:{l:'Qty of identical pumps',n:1,extra:1},
+  pumpBrand:{l:'Pump Brand',key:1},
+  pumpModel:{l:'Pump Model',key:1},
+  pumpFlow:{l:'Flow (m³/h)',n:1,key:1},
+  pumpHead:{l:'Head (m)',n:1,key:1},
+  motorBrand:{l:'Motor Brand',key:1},
+  motorModel:{l:'Motor Model'},
+  rpm:{l:'RPM',n:1,key:1},
+  pole:{l:'Pole',n:1},
+  power:{l:'Power (kW)',n:1,key:1},
+  motorEff:{l:'Motor Efficiency (%)',n:1},
+  ratedV:{l:'Rated Voltage (V)',n:1,extra:1},
+  ratedA:{l:'Rated Current (A)',n:1,extra:1},
+  hrsDay:{l:'Running Hrs / Day',n:1,key:1},
+  daysYear:{l:'Running Days / Year',n:1,extra:1},
+  pumpAge:{l:'Pump Age (Yrs)',n:1},
+  ampL1:{l:'Amp L1',n:1,key:1,fresh:1},
+  ampL2:{l:'Amp L2',n:1,fresh:1},
+  ampL3:{l:'Amp L3',n:1,fresh:1},
+  ampSite:{l:'Site Panel Amp (A)',full:1,n:1,extra:1,fresh:1},
+  voltL1:{l:'Volt L1',n:1,extra:1,fresh:1},
+  voltL2:{l:'Volt L2',n:1,extra:1,fresh:1},
+  voltL3:{l:'Volt L3',n:1,extra:1,fresh:1},
+  startMethod:{l:'Starting Method',full:1,key:1,seg:['Inverter','Star-Delta','DOL','Auto-Trans']},
+  invKw:{l:'If Inverter — kW',n:1,show:p=>p.startMethod==='Inverter'},
+  invAmp:{l:'Inverter Amp',n:1,fresh:1,show:p=>p.startMethod==='Inverter'},
+  invHz:{l:'Inverter Hz',n:1,key:1,fresh:1,show:p=>p.startMethod==='Inverter'},
+  process:{l:'Process / Application',key:1},
+  liquid:{l:'Liquid Medium',def:'Water'},
+  temp:{l:'Temperature (°C)',n:1,extra:1,fresh:1},
+  density:{l:'Density (kg/m³)',n:1,extra:1},
+  viscosity:{l:'Viscosity (cP)',n:1,extra:1},
+  chemical:{l:'Chemical Mixed',extra:1},
+  throttled:{l:'Any Valve Throttled?',full:1,key:1,fresh:1,seg:['Yes','No']},
+  throttlePct:{l:'If Yes — Throttle %',full:1,n:1,fresh:1,show:p=>p.throttled==='Yes'},
+  flowReading:{l:'Flow Meter Reading (m³/h)',n:1,key:1,fresh:1},
+  prv:{l:'Pressure Relief Valve (PRV)',fresh:1},
+  suctionP:{l:'Suction Pressure (bar)',n:1,signed:1,key:1,fresh:1},
+  dischargeP:{l:'Discharge Pressure (bar)',n:1,signed:1,key:1,fresh:1},
+  suctionPipe:{l:'Suction Pipe Size (mm)',n:1},
+  dischargePipe:{l:'Discharge Pipe Size (mm)',n:1},
+  negSuction:{l:'Negative Suction?',full:1,key:1,seg:['Yes','No']},
+  staticLift:{l:'If Yes — Static Lift (m)',full:1,n:1,show:p=>p.negSuction==='Yes'},
+  remarks:{l:'Remarks / Site Observations',full:1,area:1,fresh:1}
+};
+/* key:true = required; key can be a function when it depends on the answers. */
+const SLOTS = {
+  room:{l:'Location / room',key:1},
+  pumpPic:{l:'Pump',key:1},
+  pumpPlate:{l:'Pump plate',key:1},
+  motorPlate:{l:'Motor plate',key:1},
+  piping:{l:'Piping',key:1},
+  suctionGauge:{l:'Pressure gauge: suction',key:1},
+  dischargeGauge:{l:'Pressure gauge: discharge',key:1},
+  valve:{l:'Valve throttle',key:p=>p.throttled!=='No'},
+  suctionType:{l:'Negative or positive suction',key:1},
+  starter:{l:'Starter',key:p=>p.startMethod!=='Inverter'},
+  ampSite:{l:'Amp reading from site',key:1},
+  ampClamp:{l:'Amp reading from clamp meter',key:1},
+  voltage:{l:'Voltage, all phases',key:1},
+  inverter:{l:'Inverter with running Hz',key:1,show:p=>p.startMethod==='Inverter'},
+  flowMeter:{l:'Flow reading (optional)'},
+  medium:{l:'Medium viscosity / density / temperature (optional)'},
+  chemical:{l:'Chemical mixed (optional)'},
+  other:{l:'Other site photos (optional)'}
+};
+const isKey = (d,p) => typeof d.key==='function'?d.key(p):!!d.key;
+const STEPS = [
+  {tab:'Pump',groups:[
+    {h:'Pump identification',fields:['location','pumpName','qty'],slots:['room','pumpPic']},
+    {h:'Pump nameplate',fields:['pumpBrand','pumpModel','pumpFlow','pumpHead'],slots:['pumpPlate']}
+  ]},
+  {tab:'Motor',groups:[
+    {h:'Motor nameplate',fields:['motorBrand','motorModel','rpm','pole','power','motorEff','ratedV','ratedA'],slots:['motorPlate']}
+  ]},
+  {tab:'Electrical',groups:[
+    {h:'Starting method',fields:['startMethod','invKw','invAmp','invHz'],slots:['starter','inverter']},
+    {h:'Motor amp measured (clamp meter)',fields:['ampL1','ampL2','ampL3'],avg:1,slots:['ampClamp']},
+    {h:'Amp reading from site',fields:['ampSite'],slots:['ampSite']},
+    {h:'Voltage, all phases',fields:['voltL1','voltL2','voltL3'],slots:['voltage']}
+  ]},
+  {tab:'System',groups:[
+    {h:'Operating condition',fields:['hrsDay','daysYear','pumpAge','process']},
+    {h:'System parameters',fields:['throttled','throttlePct','flowReading','prv','suctionP','dischargeP','suctionPipe','dischargePipe','negSuction','staticLift'],slots:['piping','valve','suctionGauge','dischargeGauge','suctionType','flowMeter']},
+    {h:'On-site check',check:1}
+  ]},
+  {tab:'Notes',groups:[
+    {h:'Liquid medium',fields:['liquid','temp','density','viscosity','chemical'],slots:['medium','chemical']},
+    {h:'Remarks',fields:['remarks'],slots:['other']},
+    {h:'Still missing',missing:1}
+  ]}
+];
+const visible = (d,p) => !d.show || d.show(p);
+const blank = v => v===undefined || v===null || String(v).trim()==='';
+const num = v => { const n=parseFloat(String(v??'').replace(',','.')); return Number.isFinite(n)?n:null; };
+const fmt = (n,d=1) => n===null?'':Number(n.toFixed(d)).toString();
+const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const esc = s => String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const today = () => { const d=new Date(); return new Date(d-d.getTimezoneOffset()*6e4).toISOString().slice(0,10); };
+const pumpLabel = (p,i) => (p.pumpName||'').trim() || `Pump ${i+1}`;
+const $ = (s,el=document) => el.querySelector(s);
+const app = $('#app');
+
+/* Derived figures shown on site so a bad reading is caught before leaving. Water only. */
+function calc(p){
+  const amps=[p.ampL1,p.ampL2,p.ampL3].map(num).filter(a=>a!==null);
+  const r={};
+  if(amps.length){
+    r.amp=amps.reduce((a,b)=>a+b)/amps.length;
+    if(amps.length>1) r.imbalance=Math.max(...amps.map(a=>Math.abs(a-r.amp)))/r.amp*100;
+    const rated=num(p.ratedA); if(rated) r.loadPct=r.amp/rated*100;
+  }
+  r.isWater=/water/i.test(p.liquid||'');
+  const ps=num(p.suctionP), pd=num(p.dischargeP), lift=p.negSuction==='Yes'?num(p.staticLift):null;
+  if(r.isWater && pd!==null){
+    if(ps!==null) r.head=(pd-ps)*10.2;
+    else if(lift!==null){ r.head=pd*10.2+lift; r.headFromLift=true; }
+  }
+  const q=num(p.flowReading);
+  if(q!==null && r.head!==undefined) r.hyd=q*r.head/367;
+  const qr=num(p.pumpFlow); if(q!==null&&qr) r.flowPct=q/qr*100;
+  return r;
+}
+function missing(p,photos){
+  const out=[];
+  for(const k in F) if(F[k].key&&visible(F[k],p)&&blank(p[k])) out.push(F[k].l);
+  for(const s in SLOTS) if(isKey(SLOTS[s],p)&&visible(SLOTS[s],p)&&!photos.some(x=>x.slot===s)) out.push('Photo: '+SLOTS[s].l);
+  return out;
+}
+
+/* ========== Storage (IndexedDB, on this phone) ========== */
+let dbh;
+function openDB(){
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open('energy-check',1);
+    r.onupgradeneeded=()=>{
+      const d=r.result;
+      d.createObjectStore('visits',{keyPath:'id'});
+      d.createObjectStore('pumps',{keyPath:'id'}).createIndex('visitId','visitId');
+      d.createObjectStore('photos',{keyPath:'id'}).createIndex('pumpId','pumpId');
+    };
+    r.onsuccess=()=>{dbh=r.result;res()};
+    r.onerror=()=>rej(r.error);
+  });
+}
+const req = (store,mode,fn) => new Promise((res,rej)=>{
+  const t=dbh.transaction(store,mode); let out;
+  const q=fn(t.objectStore(store)); q.onsuccess=()=>{out=q.result};
+  t.oncomplete=()=>res(out); t.onerror=t.onabort=()=>rej(t.error);
+});
+const get = (s,id) => req(s,'readonly',o=>o.get(id));
+const put = (s,v) => req(s,'readwrite',o=>o.put(v));
+const del = (s,id) => req(s,'readwrite',o=>o.delete(id));
+const all = s => req(s,'readonly',o=>o.getAll());
+const by = (s,ix,v) => req(s,'readonly',o=>o.index(ix).getAll(v));
+const pumpsOf = async id => (await by('pumps','visitId',id)).sort((a,b)=>a.order-b.order);
+const photosOf = async id => (await by('photos','pumpId',id)).sort((a,b)=>a.createdAt-b.createdAt);
+
+async function deletePump(id){
+  for(const ph of await photosOf(id)) await del('photos',ph.id);
+  await del('pumps',id);
+}
+async function deleteVisit(id){
+  for(const p of await pumpsOf(id)) await deletePump(p.id);
+  await del('visits',id);
+}
+const lastChange = (v,pumps) => Math.max(v.updatedAt||0,...pumps.map(p=>p.updatedAt||0));
+
+/* Debounced autosave. flush() runs before navigation and when the phone leaves the app. */
+let pending=null, timer=null;
+function setSaved(busy){
+  const el=$('#saved'); if(!el) return;
+  el.textContent=busy?'Saving…':'Saved'; el.classList.toggle('busy',busy);
+}
+function queueSave(store,obj){
+  if(pending&&pending.obj!==obj) flush();
+  pending={store,obj}; setSaved(true);
+  clearTimeout(timer); timer=setTimeout(flush,250);
+}
+async function flush(){
+  clearTimeout(timer);
+  if(!pending) return;
+  const {store,obj}=pending; pending=null;
+  obj.updatedAt=Date.now();
+  try{ await put(store,obj); setSaved(false); }
+  catch(e){ toast('Could not save: '+e.message); }
+}
+addEventListener('pagehide',flush);
+document.addEventListener('visibilitychange',()=>{ if(document.hidden) flush(); });
+
+let toastT;
+function toast(msg){
+  const t=$('#toast'); t.textContent=msg; t.hidden=false;
+  clearTimeout(toastT); toastT=setTimeout(()=>t.hidden=true,2800);
+}
+
+/* ========== Router ========== */
+let routeToken=0, cur={};
+const urls=new Map();
+function clearUrls(){ urls.forEach(u=>URL.revokeObjectURL(u)); urls.clear(); }
+async function route(){
+  const my=++routeToken;
+  await flush();
+  clearUrls();
+  const [,kind,id,step]=(location.hash||'#/').split('/');
+  try{
+    if(kind==='v') await renderVisit(id,my);
+    else if(kind==='p') await renderPump(id,+step||0,my);
+    else await renderHome(my);
+    if(my===routeToken) scrollTo(0,0);
+  }catch(e){ console.error(e); app.innerHTML=`<main><div class="empty">Something went wrong: ${esc(e.message)}</div></main>`; }
+}
+addEventListener('hashchange',route);
+const go = h => { location.hash=h; };
+
+/* ========== Home: list of site visits ========== */
+async function renderHome(my){
+  const vs=await all('visits'), rows=[];
+  for(const v of vs){
+    const pumps=await pumpsOf(v.id);
+    if(blank(v.company)&&!pumps.length&&!v.signature){ await del('visits',v.id); continue; }
+    rows.push({v,pumps});
+  }
+  rows.sort((a,b)=>lastChange(b.v,b.pumps)-lastChange(a.v,a.pumps));
+  if(my!==routeToken) return;
+  const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+  let storage='';
+  try{ const e=await navigator.storage.estimate(); storage=`Using ${(e.usage/1048576).toFixed(0)} MB on this phone.`; }catch(_){}
+  if(my!==routeToken) return;
+  app.innerHTML=`
+  <header><div class="hrow"><h1 class="brand">Energy Check</h1></div></header>
+  <main>
+    <div class="list">${rows.map(({v,pumps})=>{
+      const sent=v.exportedAt&&v.exportedAt>=lastChange(v,pumps);
+      return `<div class="item"><button class="main" data-open="${v.id}">
+        <div class="t">${esc(v.company||'(No company name)')}</div>
+        <div class="s">${esc(v.date||'')} · ${pumps.length} pump${pumps.length===1?'':'s'}</div>
+        <span class="pill ${sent?'ok':''}">${sent?'Exported':'Not exported yet'}</span>
+      </button></div>`;}).join('')||
+      '<div class="empty">No site visits yet.<br>Start one when you reach the site.</div>'}</div>
+    <button class="btn primary" id="newV">+ New site visit</button>
+    <label class="btn ghost">Restore a visit from ZIP<input type="file" id="imp" accept=".zip,application/zip"></label>
+    <p class="note" style="margin-top:14px">Everything is stored on this phone and works without signal. ${esc(storage)} Export each visit when it is done: the ZIP is your backup.</p>
+    ${standalone?'':'<p class="note" style="margin-top:8px">Add this page to your Home Screen so it opens offline and the phone keeps your data.</p>'}
+  </main>`;
+  $('#newV').onclick=async()=>{
+    const v={id:uid(),company:'',date:today(),surveyor:localStorage.getItem('ec-surveyor')||'',tariff:'',signature:'',createdAt:Date.now(),updatedAt:Date.now()};
+    await put('visits',v);
+    try{ navigator.storage.persist&&navigator.storage.persist(); }catch(_){}
+    go('#/v/'+v.id);
+  };
+  app.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>go('#/v/'+b.dataset.open));
+  $('#imp').onchange=e=>importZip(e.target.files[0]);
+}
+
+/* ========== Visit: details, pump list, signature, export ========== */
+async function renderVisit(id,my){
+  const v=await get('visits',id);
+  if(!v){ location.replace('#/'); return; }
+  const pumps=await pumpsOf(id);
+  const info=[];
+  for(const p of pumps){ const ph=await photosOf(p.id); info.push({p,ph,miss:missing(p,ph)}); }
+  if(my!==routeToken) return;
+  cur={visit:v};
+  app.innerHTML=`
+  <header><div class="hrow"><button class="hback" aria-label="Back" id="bk">‹</button><h1>${esc(v.company||'New site visit')}</h1><span class="saved" id="saved"></span></div></header>
+  <main>
+    <div class="card"><h2>Site visit</h2><div class="grid">
+      <div class="f full"><label for="company">Company Name</label><input class="in" id="company" data-v="company" value="${esc(v.company)}" autocomplete="organization"></div>
+      <div class="f"><label for="date">Visit Date</label><input class="in" id="date" type="date" data-v="date" value="${esc(v.date)}"></div>
+      <div class="f"><label for="tariff">Tariff (RM/kWh)</label><input class="in" id="tariff" inputmode="decimal" data-v="tariff" value="${esc(v.tariff)}"></div>
+    </div></div>
+
+    <div class="list">${info.map(({p,ph,miss},i)=>`
+      <div class="item"><button class="main" data-pump="${p.id}">
+        <div class="t">${esc(pumpLabel(p,i))}</div>
+        <div class="s">${esc([p.pumpBrand,p.pumpModel,p.power&&p.power+' kW'].filter(Boolean).join(' · ')||'No nameplate data yet')}</div>
+        <div class="s">${ph.length} photo${ph.length===1?'':'s'}</div>
+        <span class="pill ${miss.length?'':'ok'}">${miss.length?miss.length+' item'+(miss.length===1?'':'s')+' missing':'Complete'}</span>
+      </button><div class="side"><button data-dup="${p.id}">Copy</button><button data-delp="${p.id}">Delete</button></div></div>`).join('')}</div>
+    <button class="btn primary" id="addP">+ Add pump</button>
+    <p class="note" style="margin:8px 0 14px">Copy starts a new pump with the same nameplate details. Readings and photos stay blank.</p>
+
+    <div class="card"><h2>Surveyed by</h2>
+      <div class="f" style="margin-bottom:12px"><label for="surveyor">Name</label><input class="in" id="surveyor" data-v="surveyor" value="${esc(v.surveyor)}" autocomplete="name"></div>
+      <div class="lbl note" style="margin-bottom:6px;font-weight:600">Signature</div>
+      <canvas class="sigpad" id="sig" width="700" height="260" aria-label="Signature pad"></canvas>
+      <button class="btn ghost" id="sigClear" style="margin-top:8px">Clear signature</button>
+    </div>
+
+    <button class="btn primary" id="exp" ${pumps.length?'':'disabled style="opacity:.5"'}>Export PDF &amp; photos</button>
+    <button class="btn danger" id="delV">Delete this visit</button>
+  </main>`;
+  $('#bk').onclick=()=>go('#/');
+  app.querySelectorAll('[data-v]').forEach(el=>el.oninput=()=>{
+    v[el.dataset.v]=el.value;
+    if(el.dataset.v==='surveyor') localStorage.setItem('ec-surveyor',el.value);
+    if(el.dataset.v==='company') $('h1').textContent=el.value||'New site visit';
+    queueSave('visits',v);
+  });
+  $('#addP').onclick=async()=>{
+    const prev=pumps[pumps.length-1];
+    const p=newPump(v.id,(prev?prev.order:0)+1);
+    if(prev) p.location=prev.location;
+    await put('pumps',p);
+    go('#/p/'+p.id+'/0');
+  };
+  app.querySelectorAll('[data-pump]').forEach(b=>b.onclick=()=>go('#/p/'+b.dataset.pump+'/0'));
+  app.querySelectorAll('[data-dup]').forEach(b=>b.onclick=async()=>{
+    const src=pumps.find(p=>p.id===b.dataset.dup);
+    const p=newPump(v.id,pumps[pumps.length-1].order+1);
+    for(const k in F) if(!F[k].fresh&&!blank(src[k])) p[k]=src[k];
+    await put('pumps',p);
+    go('#/p/'+p.id+'/0');
+  });
+  app.querySelectorAll('[data-delp]').forEach(b=>b.onclick=async()=>{
+    const i=pumps.findIndex(p=>p.id===b.dataset.delp);
+    if(!confirm(`Delete ${pumpLabel(pumps[i],i)} and its photos? This cannot be undone.`)) return;
+    await flush();
+    await deletePump(b.dataset.delp);
+    v.updatedAt=Date.now(); await put('visits',v);
+    route();
+  });
+  setupSignature(v);
+  $('#exp').onclick=()=>pumps.length&&exportVisit(v.id);
+  $('#delV').onclick=async()=>{
+    if(!confirm(`Delete the whole visit "${v.company||'unnamed'}" with ${pumps.length} pump(s) and all photos? This cannot be undone.`)) return;
+    pending=null; clearTimeout(timer);
+    await deleteVisit(v.id);
+    go('#/');
+  };
+}
+function newPump(visitId,order){
+  const p={id:uid(),visitId,order,createdAt:Date.now(),updatedAt:Date.now()};
+  for(const k in F) if(F[k].def) p[k]=F[k].def;
+  return p;
+}
+function setupSignature(v){
+  const c=$('#sig'), g=c.getContext('2d');
+  const paper=()=>{ g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); };
+  paper();
+  if(v.signature){ const im=new Image(); im.onload=()=>g.drawImage(im,0,0,c.width,c.height); im.src=v.signature; }
+  g.lineWidth=4; g.lineCap='round'; g.lineJoin='round'; g.strokeStyle='#111';
+  let drawing=false;
+  const at=e=>{ const r=c.getBoundingClientRect(); return [(e.clientX-r.left)*c.width/r.width,(e.clientY-r.top)*c.height/r.height]; };
+  c.onpointerdown=e=>{ drawing=true; c.setPointerCapture(e.pointerId); g.beginPath(); g.moveTo(...at(e)); g.lineTo(...at(e)); g.stroke(); e.preventDefault(); };
+  c.onpointermove=e=>{ if(!drawing) return; g.lineTo(...at(e)); g.stroke(); };
+  c.onpointerup=c.onpointercancel=()=>{ if(!drawing) return; drawing=false; v.signature=c.toDataURL('image/png'); queueSave('visits',v); };
+  $('#sigClear').onclick=()=>{ paper(); v.signature=''; queueSave('visits',v); };
+}
+
+/* ========== Pump form ========== */
+function fieldHTML(k,p){
+  const d=F[k], val=p[k]??'';
+  const cls='f'+(d.full?' full':'');
+  const hide=visible(d,p)?'':' hidden';
+  if(d.seg) return `<div class="${cls}" data-show="${k}"${hide}><span class="lbl">${esc(d.l)}</span><div class="seg" role="group" aria-label="${esc(d.l)}">${
+    d.seg.map(o=>`<button type="button" data-seg="${k}" data-val="${esc(o)}" aria-pressed="${val===o}">${esc(o)}</button>`).join('')}</div></div>`;
+  if(d.area) return `<div class="${cls}" data-show="${k}"${hide}><label for="f-${k}">${esc(d.l)}</label><textarea class="in" id="f-${k}" data-k="${k}">${esc(val)}</textarea></div>`;
+  const inp=`<input class="in" id="f-${k}" data-k="${k}" value="${esc(val)}" ${d.n?'inputmode="decimal"':'autocapitalize="sentences"'} autocomplete="off">`;
+  return `<div class="${cls}" data-show="${k}"${hide}><label for="f-${k}">${esc(d.l)}</label>${
+    d.signed?`<div class="withbtn">${inp}<button type="button" class="sign" data-sign="${k}" aria-label="Plus or minus">±</button></div>`:inp}</div>`;
+}
+function slotHTML(s,p,photos){
+  const d=SLOTS[s], mine=photos.filter(x=>x.slot===s);
+  for(const ph of mine) if(!urls.has(ph.id)) urls.set(ph.id,URL.createObjectURL(ph.blob));
+  return `<div class="slot" data-slot="${s}"${visible(d,p)?'':' hidden'}>
+    <div class="top"><span>${esc(d.l)}</span>${mine.length?`<span class="got">${mine.length} photo${mine.length===1?'':'s'}</span>`:`<span class="${isKey(d,p)?'need':'opt'}">${isKey(d,p)?'Photo needed':''}</span>`}</div>
+    <div class="thumbs">${mine.map(ph=>`<button type="button" data-view="${ph.id}" aria-label="View photo"><img src="${urls.get(ph.id)}" alt="${esc(d.l)}"></button>`).join('')}</div>
+    <div class="pick">
+      <label>Take photo<input type="file" accept="image/*" capture="environment" data-add="${s}"></label>
+      <label>Gallery<input type="file" accept="image/*" multiple data-add="${s}"></label>
+    </div></div>`;
+}
+function checkHTML(p){
+  const r=calc(p), rows=[];
+  const row=(a,b,w)=>rows.push(`<div class="${w?'warn':''}"><span>${esc(a)}</span><b>${esc(b)}</b></div>`);
+  if(r.amp!==undefined) row('Average motor current',fmt(r.amp,2)+' A');
+  if(r.imbalance!==undefined) row('Phase imbalance',fmt(r.imbalance)+' %'+(r.imbalance>5?' (high)':''),r.imbalance>5);
+  if(r.loadPct!==undefined) row('Current vs rated',fmt(r.loadPct,0)+' %'+(r.loadPct>100?' (over rated)':''),r.loadPct>100);
+  if(r.head!==undefined){
+    const pl=num(p.pumpHead);
+    row('Measured head'+(r.headFromLift?' (gauge + lift)':''),fmt(r.head)+' m'+(pl?` vs ${fmt(pl)} m plate`:''),r.head<=0);
+  }
+  if(r.flowPct!==undefined) row('Flow vs nameplate',fmt(r.flowPct,0)+' %');
+  if(r.hyd!==undefined) row('Hydraulic power',fmt(r.hyd)+' kW');
+  if(!r.isWater) rows.push('<p class="note">Head and hydraulic power are only worked out for water.</p>');
+  return rows.join('')||'<p class="note">Enter amps, flow and pressures to see a check of the readings here.</p>';
+}
+function stepDone(st,p,photos){
+  return st.groups.every(g=>
+    (g.fields||[]).every(k=>!F[k].key||!visible(F[k],p)||!blank(p[k])) &&
+    (g.slots||[]).every(s=>!isKey(SLOTS[s],p)||!visible(SLOTS[s],p)||photos.some(x=>x.slot===s)));
+}
+function refreshPump(){
+  const {pump:p,photos}=cur; if(!p) return;
+  for(const k in F){ const el=app.querySelector(`[data-show="${k}"]`); if(el) el.hidden=!visible(F[k],p); }
+  for(const s in SLOTS){
+    const el=app.querySelector(`[data-slot="${s}"]`); if(!el) continue;
+    el.hidden=!visible(SLOTS[s],p);
+    const need=el.querySelector('.need, .opt');
+    if(need){ need.className=isKey(SLOTS[s],p)?'need':'opt'; need.textContent=isKey(SLOTS[s],p)?'Photo needed':''; }
+  }
+  const ch=$('#check'); if(ch) ch.innerHTML=checkHTML(p);
+  const av=$('#avg'); if(av){ const a=calc(p).amp; av.textContent=a===undefined?'—':fmt(a,2)+' A'; }
+  const mi=$('#missing');
+  if(mi){ const m=missing(p,photos); mi.innerHTML=m.length?`<ul class="miss">${m.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`:'<p class="note" style="color:var(--ok)">Nothing missing for this pump.</p>'; }
+  STEPS.forEach((st,i)=>{ const t=$('#tick'+i); if(t) t.textContent=stepDone(st,p,photos)?' ✓':''; });
+}
+async function renderPump(id,step,my){
+  const p=await get('pumps',id);
+  if(!p){ location.replace('#/'); return; }
+  const photos=await photosOf(id), siblings=await pumpsOf(p.visitId);
+  if(my!==routeToken) return;
+  step=Math.min(Math.max(step,0),STEPS.length-1);
+  const idx=siblings.findIndex(x=>x.id===id);
+  cur={pump:p,photos,idx};
+  const st=STEPS[step];
+  app.innerHTML=`
+  <header>
+    <div class="hrow"><button class="hback" aria-label="Back to visit" id="bk">‹</button><h1 id="ttl">${esc(pumpLabel(p,idx))}</h1><span class="saved" id="saved">Saved</span></div>
+    <div class="tabs">${STEPS.map((s,i)=>`<button class="tab ${i===step?'on':''}" data-step="${i}">${s.tab}<span class="tick" id="tick${i}"></span></button>`).join('')}</div>
+  </header>
+  <main>${st.groups.map(g=>`<div class="card"><h2>${esc(g.h)}</h2>
+    ${g.fields?`<div class="grid">${g.fields.map(k=>fieldHTML(k,p)).join('')}${g.avg?'<div class="f full"><span class="lbl">Motor Amp Measured (average)</span><div class="readout" id="avg">—</div></div>':''}</div>`:''}
+    ${g.check?'<div class="check" id="check"></div>':''}
+    ${g.missing?'<div id="missing"></div>':''}
+    ${(g.slots||[]).map(s=>slotHTML(s,p,photos)).join('')}
+  </div>`).join('')}</main>
+  <div class="bar"><div class="in2">
+    <button class="btn ghost" id="prev">${step?'Back':'Visit'}</button>
+    <button class="btn primary" id="next">${step<STEPS.length-1?'Next: '+STEPS[step+1].tab:'Done'}</button>
+  </div></div>`;
+  refreshPump();
+  const toStep=i=>location.replace('#/p/'+id+'/'+i);
+  const toVisit=()=>go('#/v/'+p.visitId);
+  $('#bk').onclick=toVisit;
+  $('#prev').onclick=()=>step?toStep(step-1):toVisit();
+  $('#next').onclick=()=>step<STEPS.length-1?toStep(step+1):toVisit();
+  app.querySelectorAll('[data-step]').forEach(b=>b.onclick=()=>toStep(+b.dataset.step));
+}
+
+/* Form events are delegated, so re-rendering a photo slot never loses the field in focus. */
+app.addEventListener('input',e=>{
+  const k=e.target.dataset.k; if(!k||!cur.pump) return;
+  cur.pump[k]=e.target.value;
+  if(k==='pumpName') $('#ttl').textContent=pumpLabel(cur.pump,cur.idx);
+  queueSave('pumps',cur.pump); refreshPump();
+});
+app.addEventListener('click',e=>{
+  const seg=e.target.closest('[data-seg]');
+  if(seg&&cur.pump){
+    const k=seg.dataset.seg, on=cur.pump[k]===seg.dataset.val;
+    cur.pump[k]=on?'':seg.dataset.val;
+    seg.parentElement.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b===seg&&!on));
+    queueSave('pumps',cur.pump); refreshPump();
+    return;
+  }
+  const sg=e.target.closest('[data-sign]');
+  if(sg&&cur.pump){
+    const k=sg.dataset.sign, inp=$('#f-'+k), v=inp.value.trim();
+    inp.value=v.startsWith('-')?v.slice(1):'-'+v;
+    cur.pump[k]=inp.value; queueSave('pumps',cur.pump); refreshPump(); inp.focus();
+    return;
+  }
+  const vw=e.target.closest('[data-view]');
+  if(vw) viewPhoto(vw.dataset.view);
+});
+app.addEventListener('change',async e=>{
+  const s=e.target.dataset.add; if(!s||!cur.pump) return;
+  const files=[...e.target.files], p=cur.pump;
+  e.target.value='';
+  await flush();
+  let n=0;
+  for(const file of files){
+    toast(files.length>1?`Saving photo ${n+1} of ${files.length}…`:'Saving photo…');
+    try{
+      const {blob,w,h}=await shrink(file,2000,.82);
+      const ph={id:uid(),pumpId:p.id,slot:s,blob,w,h,createdAt:Date.now()};
+      await put('photos',ph);
+      if(cur.pump===p) cur.photos.push(ph);
+      n++;
+    }catch(err){ console.error(err); toast('Could not read "'+file.name+'". Try another photo.'); }
+  }
+  if(!n) return;
+  p.updatedAt=Date.now(); await put('pumps',p);
+  if(cur.pump===p){ redrawSlot(s); refreshPump(); }
+  toast(n===1?'Photo saved':n+' photos saved');
+});
+function redrawSlot(s){
+  const el=app.querySelector(`[data-slot="${s}"]`);
+  if(el) el.outerHTML=slotHTML(s,cur.pump,cur.photos);
+}
+async function shrink(fileOrBlob,edge,q){
+  const url=URL.createObjectURL(fileOrBlob);
+  try{
+    const img=new Image(); img.src=url; await img.decode();
+    const k=Math.min(1,edge/Math.max(img.naturalWidth,img.naturalHeight));
+    const w=Math.round(img.naturalWidth*k), h=Math.round(img.naturalHeight*k);
+    const c=document.createElement('canvas'); c.width=w; c.height=h;
+    c.getContext('2d').drawImage(img,0,0,w,h);
+    const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',q));
+    if(!blob) throw new Error('Could not encode image');
+    return {blob,w,h};
+  }finally{ URL.revokeObjectURL(url); }
+}
+function viewPhoto(id){
+  const ph=cur.photos.find(x=>x.id===id); if(!ph) return;
+  const o=document.createElement('div'); o.className='overlay';
+  o.innerHTML=`<div class="cap">${esc(SLOTS[ph.slot].l)}</div><div class="pic"><img src="${urls.get(id)}" alt=""></div>
+    <div class="acts"><button class="btn danger" id="pd">Delete</button><button class="btn" id="pc">Close</button></div>`;
+  document.body.append(o);
+  $('#pc',o).onclick=()=>o.remove();
+  $('#pd',o).onclick=async()=>{
+    if(!confirm('Delete this photo?')) return;
+    await del('photos',id);
+    cur.photos=cur.photos.filter(x=>x.id!==id);
+    cur.pump.updatedAt=Date.now(); await put('pumps',cur.pump);
+    URL.revokeObjectURL(urls.get(id)); urls.delete(id);
+    redrawSlot(ph.slot); refreshPump(); o.remove();
+  };
+}
+
+/* ========== PDF: same layout as the paper checklist, then photo pages ========== */
+const COMPANY='IPOH HYDROTECH ENGINEERING SDN. BHD.';
+const STRAP='Authorised Grundfos Distributor Partner & Service Centre  |  Energy Optimization Division';
+const pdfText = s => String(s??'').replace(/[^\x20-\x7E\xA0-\xFF–—\n]/g,'?');
+const dmy = iso => { const d=new Date((iso||'')+'T00:00:00'); return isNaN(d)?'':d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'2-digit'}).replace(/ /g,'-'); };
+const shown = (k,p) => visible(F[k],p)?(p[k]??''):'';
+
+function drawForm(doc,v,p){
+  const L=15, W=180, c=[47,43,47,43], rowH=6.3;
+  let y=11;
+  const band=(txt,fill,h,size,align)=>{
+    doc.setFillColor(...fill); doc.rect(L,y,W,h,'F');
+    doc.setTextColor(255); doc.setFont('helvetica','bold'); doc.setFontSize(size);
+    doc.text(txt,align==='center'?L+W/2:L+2,y+h/2+size*.13,{align:align||'left'});
+    y+=h;
+  };
+  const cell=(x,w,txt,opts={})=>{
+    const h=opts.h||rowH;
+    if(opts.fill){ doc.setFillColor(238,238,238); doc.rect(x,y,w,h,'F'); }
+    doc.setDrawColor(150); doc.setLineWidth(.15); doc.rect(x,y,w,h);
+    doc.setTextColor(25); doc.setFont('helvetica',opts.fill?'bold':'normal');
+    let size=9; const s=pdfText(txt), max=w-3;
+    doc.setFontSize(size);
+    while(size>7&&doc.getTextWidth(s)>max){ size-=.5; doc.setFontSize(size); }
+    if(doc.getTextWidth(s)>max){
+      doc.setFontSize(6.5);
+      const lines=doc.splitTextToSize(s,max).slice(0,2);
+      doc.text(lines,x+1.5,y+2.8);
+    } else doc.text(s,x+1.5,y+h/2+1.1);
+  };
+  const row=(k1,v1,k2,v2)=>{
+    cell(L,c[0],k1+' :',{fill:1}); cell(L+c[0],c[1],v1);
+    cell(L+c[0]+c[1],c[2],k2+' :',{fill:1}); cell(L+c[0]+c[1]+c[2],c[3],v2);
+    y+=rowH;
+  };
+  const wide=(k,val)=>{ cell(L,c[0],k+' :',{fill:1}); cell(L+c[0],W-c[0],val); y+=rowH; };
+  const rf=(a,b)=>row(F[a].l,shown(a,p),F[b].l,shown(b,p));
+  const sub=t=>{
+    doc.setDrawColor(150); doc.setLineWidth(.15); doc.rect(L,y,W,5.5);
+    doc.setTextColor(40); doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.text(t,L+2,y+3.9); y+=5.5;
+  };
+  const r=calc(p);
+
+  band(COMPANY,[85,85,85],9,13,'center');
+  band('ENERGY CHECK — SITE DATA COLLECTION FORM',[125,125,125],7,10.5,'center');
+  doc.setTextColor(90); doc.setFont('helvetica','italic'); doc.setFontSize(7);
+  doc.text(STRAP,L+W/2,y+3,{align:'center'}); y+=4.5;
+  row('Company Name',v.company,'Visit Date',dmy(v.date));
+  wide(F.location.l,p.location);
+  row('Pump Name / ID (by Client)',p.pumpName,F.qty.l,p.qty);
+
+  band('SECTION A — PUMP & MOTOR DATA',[85,85,85],6.5,10);
+  sub('PUMP NAMEPLATE');
+  rf('pumpBrand','pumpModel'); rf('pumpFlow','pumpHead');
+  sub('MOTOR NAMEPLATE');
+  rf('motorBrand','motorModel'); rf('rpm','pole'); rf('power','motorEff'); rf('ratedV','ratedA');
+  sub('OPERATING CONDITION');
+  rf('hrsDay','pumpAge');
+  row(F.daysYear.l,p.daysYear,'Tariff (RM/kWh)',v.tariff);
+  const ph=[['L1',p.ampL1],['L2',p.ampL2],['L3',p.ampL3]].filter(a=>!blank(a[1])).map(a=>a[0]+' '+a[1]).join('  /  ');
+  wide('Motor Amp Measured (A)',r.amp===undefined?'':`${fmt(r.amp,2)}   (${ph})`);
+  const volts=[p.voltL1,p.voltL2,p.voltL3].filter(x=>!blank(x)).join(' / ');
+  row(F.ampSite.l,p.ampSite,'Voltage L1 / L2 / L3 (V)',volts);
+  wide(F.startMethod.l,F.startMethod.seg.map(o=>`[${p.startMethod===o?'X':'  '}] ${o}`).join('     '));
+  rf('invKw','invAmp');
+  rf('invHz','process');
+  row(F.liquid.l,p.liquid,F.temp.l,p.temp);
+  row(F.density.l,p.density,F.viscosity.l,p.viscosity);
+  wide(F.chemical.l,p.chemical);
+
+  band('SECTION B — SYSTEM PARAMETERS',[85,85,85],6.5,10);
+  const yn=x=>`[${x==='Yes'?'X':'  '}] Yes     [${x==='No'?'X':'  '}] No`;
+  row(F.throttled.l,yn(p.throttled),F.throttlePct.l,shown('throttlePct',p));
+  rf('flowReading','prv'); rf('suctionP','dischargeP'); rf('suctionPipe','dischargePipe');
+  row(F.negSuction.l,yn(p.negSuction),F.staticLift.l,shown('staticLift',p));
+  if(r.head!==undefined||r.hyd!==undefined) row('Measured Head (m, calculated)',r.head===undefined?'':fmt(r.head),'Hydraulic Power (kW, calculated)',r.hyd===undefined?'':fmt(r.hyd));
+
+  band('REMARKS / SITE OBSERVATIONS',[85,85,85],6.5,10);
+  const signH=15, footY=290, boxH=Math.max(footY-y-signH-1,12);
+  doc.setFont('helvetica','normal'); doc.setFontSize(9);
+  const lines=doc.splitTextToSize(pdfText(p.remarks||''),W-4), fit=Math.floor((boxH-2)/4);
+  doc.setDrawColor(150); doc.rect(L,y,W,boxH);
+  doc.setTextColor(25); doc.text(lines.slice(0,fit),L+2,y+4.5);
+  y+=boxH;
+  cell(L,c[0],'Surveyed By (Name & Sign) :',{fill:1,h:signH});
+  cell(L+c[0],W-c[0],v.surveyor||'',{h:signH});
+  if(v.signature){ try{ doc.addImage(v.signature,'PNG',L+W-62,y+.6,37.5,13.9); }catch(e){ console.warn(e); } }
+  y+=signH;
+  doc.setTextColor(90); doc.setFont('helvetica','italic'); doc.setFontSize(6.5);
+  doc.text('Ipoh Hydrotech Engineering Sdn. Bhd.  |  '+STRAP,L+W/2,footY+3,{align:'center'});
+  return lines.slice(fit);
+}
+function pageHead(doc,title,sub){
+  doc.setFillColor(85,85,85); doc.rect(15,11,180,8,'F');
+  doc.setTextColor(255); doc.setFont('helvetica','bold'); doc.setFontSize(10.5);
+  doc.text(pdfText(title),17,16.4);
+  doc.setTextColor(90); doc.setFont('helvetica','normal'); doc.setFontSize(8);
+  doc.text(pdfText(sub),15,23);
+}
+async function drawPhotos(doc,v,p,label,photos){
+  const order=Object.keys(SLOTS);
+  const list=[...photos].sort((a,b)=>order.indexOf(a.slot)-order.indexOf(b.slot)||a.createdAt-b.createdAt);
+  const cw=88, chh=78, gap=4;
+  for(let i=0;i<list.length;i++){
+    if(i%6===0){
+      doc.addPage();
+      pageHead(doc,`PHOTOS — ${label}`,`${v.company||''}  |  ${dmy(v.date)}`);
+    }
+    const ph=list[i], col=i%2, r=Math.floor((i%6)/2);
+    const x=15+col*(cw+gap+0), y=27+r*(chh+9);
+    const {blob,w,h}=await shrink(ph.blob,1200,.72);
+    const data=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(blob); });
+    const k=Math.min(cw/w,chh/h), iw=w*k, ih=h*k;
+    doc.addImage(data,'JPEG',x+(cw-iw)/2,y+(chh-ih)/2,iw,ih);
+    doc.setDrawColor(190); doc.setLineWidth(.15); doc.rect(x,y,cw,chh);
+    doc.setTextColor(25); doc.setFont('helvetica','bold'); doc.setFontSize(8.5);
+    doc.text(pdfText(SLOTS[ph.slot].l),x,y+chh+4);
+  }
+}
+async function buildPDF(v,pumps,progress){
+  const doc=new jspdf.jsPDF({unit:'mm',format:'a4',compress:true});
+  for(let i=0;i<pumps.length;i++){
+    const {p,photos}=pumps[i], label=pumpLabel(p,i);
+    progress(`Building PDF: ${label} (${i+1} of ${pumps.length})`);
+    if(i) doc.addPage();
+    const rest=drawForm(doc,v,p);
+    if(rest.length){
+      doc.addPage();
+      pageHead(doc,`REMARKS (CONTINUED) — ${label}`,`${v.company||''}  |  ${dmy(v.date)}`);
+      doc.setTextColor(25); doc.setFont('helvetica','normal'); doc.setFontSize(9);
+      let y=30;
+      for(const ln of rest){ if(y>285){ doc.addPage(); y=20; } doc.text(ln,17,y); y+=4; }
+    }
+    await drawPhotos(doc,v,p,label,photos);
+  }
+  return doc.output('blob');
+}
+
+/* ========== Export & restore ========== */
+const safe = s => String(s||'').replace(/[\\/:*?"<>|\x00-\x1f]/g,' ').replace(/\s+/g,' ').trim().slice(0,70)||'Unnamed';
+async function buildZIP(v,pumps,pdf,base){
+  const zip=new JSZip(), used=new Set(), data={app:'energy-check',version:1,visit:v,pumps:[]};
+  zip.file(base+'.pdf',pdf);
+  for(let i=0;i<pumps.length;i++){
+    const {p,photos}=pumps[i];
+    let dir=safe(pumpLabel(p,i)), n=2; const root=dir;
+    while(used.has(dir.toLowerCase())) dir=`${root} (${n++})`;
+    used.add(dir.toLowerCase());
+    const counts={}, rec={fields:{},calculated:calc(p),photos:[]};
+    for(const k in F) rec.fields[k]=visible(F[k],p)?(p[k]??''):'';
+    for(const k in F) if(blank(rec.fields[k])&&!blank(p[k])) rec.fields['_hidden_'+k]=p[k];
+    rec.order=p.order;
+    for(const ph of photos){
+      counts[ph.slot]=(counts[ph.slot]||0)+1;
+      const path=`${dir}/${safe(SLOTS[ph.slot].l)} ${counts[ph.slot]}.jpg`;
+      zip.file(path,ph.blob);
+      rec.photos.push({slot:ph.slot,path,w:ph.w,h:ph.h});
+    }
+    data.pumps.push(rec);
+  }
+  zip.file('data.json',JSON.stringify(data,null,2));
+  return zip.generateAsync({type:'blob',compression:'STORE'});
+}
+function sheet(html){
+  const o=document.createElement('div'); o.className='sheetwrap';
+  o.innerHTML=`<div class="sheet">${html}</div>`;
+  document.body.append(o);
+  return o;
+}
+const mb = b => (b.size/1048576).toFixed(1)+' MB';
+async function exportVisit(id){
+  await flush();
+  const o=sheet('<div class="spin"></div><h3 id="prog" style="text-align:center">Preparing…</h3>');
+  const progress=m=>{ const el=$('#prog',o); if(el) el.textContent=m; };
+  try{
+    const v=await get('visits',id), list=[];
+    for(const p of await pumpsOf(id)) list.push({p,photos:await photosOf(p.id)});
+    const base=safe(`Energy Check - ${v.company||'Site'} - ${v.date||today()}`);
+    const pdf=await buildPDF(v,list,progress);
+    progress('Packing photos…');
+    const zip=await buildZIP(v,list,pdf,base);
+    const pdfF=new File([pdf],base+'.pdf',{type:'application/pdf'});
+    const zipF=new File([zip],base+'.zip',{type:'application/zip'});
+    const can=f=>{ try{ return !!(navigator.canShare&&navigator.canShare({files:[f]})); }catch(_){ return false; } };
+    const miss=list.map(({p,photos},i)=>({l:pumpLabel(p,i),n:missing(p,photos).length})).filter(x=>x.n);
+    /* The share call needs a fresh tap, so it cannot run straight after the slow build. */
+    o.firstChild.innerHTML=`<h3>Export ready</h3>
+      ${miss.length?`<p class="note" style="color:var(--warn)">Still missing: ${miss.map(m=>`${esc(m.l)} (${m.n})`).join(', ')}. You can export now and again later.</p>`:'<p class="note">All key items are filled in.</p>'}
+      ${can(pdfF)?`<button class="btn primary" data-share="pdf">Share PDF (${mb(pdf)})</button>`:''}
+      <button class="btn ${can(pdfF)?'':'primary'}" data-save="pdf">Save PDF to phone</button>
+      ${can(zipF)?`<button class="btn" data-share="zip">Share ZIP with full photos (${mb(zip)})</button>`:''}
+      <button class="btn" data-save="zip">Save ZIP with full photos (${mb(zip)})</button>
+      <button class="btn ghost" data-close="1">Close</button>`;
+    const mark=async()=>{ const fresh=await get('visits',id); fresh.exportedAt=Date.now(); await put('visits',fresh); };
+    const pick=k=>k==='pdf'?pdfF:zipF;
+    o.addEventListener('click',async e=>{
+      const b=e.target.closest('button'); if(!b) return;
+      if(b.dataset.close){ o.remove(); route(); return; }
+      if(b.dataset.share){
+        try{ await navigator.share({files:[pick(b.dataset.share)],title:base}); await mark(); toast('Shared'); }
+        catch(err){ if(err.name!=='AbortError') toast('Share failed. Use Save instead.'); }
+      }
+      if(b.dataset.save){
+        const f=pick(b.dataset.save), a=document.createElement('a'), u=URL.createObjectURL(f);
+        a.href=u; a.download=f.name; document.body.append(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(u),60000);
+        await mark(); toast('Saved to Downloads');
+      }
+    });
+  }catch(e){
+    console.error(e);
+    o.firstChild.innerHTML=`<h3>Export failed</h3><p class="note">${esc(e.message)}</p><button class="btn" data-x="1">Close</button>`;
+    $('[data-x]',o).onclick=()=>o.remove();
+  }
+}
+async function importZip(file){
+  if(!file) return;
+  const o=sheet('<div class="spin"></div><h3 style="text-align:center">Restoring…</h3>');
+  try{
+    const zip=await JSZip.loadAsync(file);
+    const jf=zip.file('data.json');
+    if(!jf) throw new Error('This ZIP was not exported from Energy Check.');
+    const data=JSON.parse(await jf.async('string'));
+    if(data.app!=='energy-check'||!data.visit||!Array.isArray(data.pumps)) throw new Error('This ZIP was not exported from Energy Check.');
+    const s=data.visit, sig=String(s.signature||'');
+    const v={id:uid(),company:String(s.company||''),date:String(s.date||''),surveyor:String(s.surveyor||''),tariff:String(s.tariff||''),
+      signature:sig.startsWith('data:image/png;base64,')?sig:'',createdAt:Date.now(),updatedAt:Date.now()};
+    await put('visits',v);
+    let order=1;
+    for(const rec of data.pumps){
+      const p={id:uid(),visitId:v.id,order:order++,createdAt:Date.now(),updatedAt:Date.now()};
+      for(const k in F){
+        const val=rec.fields&&(rec.fields[k]||rec.fields['_hidden_'+k]);
+        if(!blank(val)) p[k]=String(val);
+      }
+      await put('pumps',p);
+      for(const r of rec.photos||[]){
+        const zf=zip.file(r.path);
+        if(!zf||!SLOTS[r.slot]) continue;
+        const blob=(await zf.async('blob')).slice(0,undefined,'image/jpeg');
+        await put('photos',{id:uid(),pumpId:p.id,slot:r.slot,blob,w:r.w,h:r.h,createdAt:Date.now()});
+      }
+    }
+    o.remove();
+    go('#/v/'+v.id);
+    toast('Visit restored');
+  }catch(e){
+    console.error(e);
+    o.firstChild.innerHTML=`<h3>Could not restore</h3><p class="note">${esc(e.message)}</p><button class="btn" data-x="1">Close</button>`;
+    $('[data-x]',o).onclick=()=>o.remove();
+  }
+}
+
+/* ========== Start ========== */
+openDB().then(route).catch(e=>{
+  app.innerHTML=`<main><div class="empty">This browser cannot store data here (${esc(e.message)}). Turn off private browsing and try again.</div></main>`;
+});
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(e=>console.warn(e)));
+}
+</script>
+</body>
+</html>
