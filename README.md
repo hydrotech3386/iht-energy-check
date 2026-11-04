@@ -57,7 +57,7 @@ Marked "Photo needed" in the app and listed under "Still missing". They never bl
 
 ## Fields added beyond the paper form
 
-Quantity of identical pumps, rated voltage and current, running days/year, tariff, amps L1/L2/L3 (averaged into
+Quantity of identical pumps, rated voltage and current, running days/week, pump installation year, tariff, amps L1/L2/L3 (averaged into
 Motor Amp Measured), site panel amp, volts L1/L2/L3, temperature, density, viscosity, chemical mixed.
 
 ## On-site check
@@ -67,6 +67,12 @@ Calculated for water only, to catch a bad reading before leaving site:
 - Head (m) = (discharge - suction) bar x 10.2. With no suction reading and negative suction: discharge x 10.2 + static lift.
 - Hydraulic power (kW) = flow (m3/h) x head (m) / 367.
 - Phase imbalance = largest deviation from the average current. Flagged above 5%.
+
+## Calculated fields
+
+- Running hours/year = hours/day x days/week x 365 / 7. 24/7 gives 8,760.
+- Pump age = the visit's year minus the installation year, so an old visit's record does not change later.
+- Pumps saved earlier keep their typed days/year and age until someone fills in the new fields.
 
 ## Editing the checklist
 

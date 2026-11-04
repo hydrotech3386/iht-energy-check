@@ -159,8 +159,10 @@ const F = {
   ratedV:{l:'Rated Voltage (V)',n:1,extra:1},
   ratedA:{l:'Rated Current (A)',n:1,extra:1},
   hrsDay:{l:'Running Hrs / Day',n:1,key:1},
-  daysYear:{l:'Running Days / Year',n:1,extra:1},
-  pumpAge:{l:'Pump Age (Yrs)',n:1},
+  daysWeek:{l:'Running Days / Week',n:1,extra:1,key:p=>blank(p.daysYear)},
+  hoursYear:{l:'Running Hours / Year',full:1,extra:1,calc:(p)=>{ const r=runningHours(p); return r===null?(badRunning(p)?'Check the hours and days':'—'):Math.round(r).toLocaleString('en-US')+' hrs'; }},
+  installYear:{l:'Pump Installation Year',n:1,extra:1},
+  pumpAge:{l:'Pump Age (Yrs)',calc:(p,date)=>{ const a=pumpAgeOf(p,date); return a===null?(blank(p.installYear)?'—':'Check the year'):a+(a===1?' yr':' yrs'); }},
   ampL1:{l:'Amp L1',n:1,key:1,fresh:1},
   ampL2:{l:'Amp L2',n:1,fresh:1},
   ampL3:{l:'Amp L3',n:1,fresh:1},
@@ -227,7 +229,7 @@ const STEPS = [
     {h:'Voltage, all phases',fields:['voltL1','voltL2','voltL3'],slots:['voltage']}
   ]},
   {tab:'System',groups:[
-    {h:'Operating condition',fields:['hrsDay','daysYear','pumpAge','process']},
+    {h:'Operating condition',fields:['hrsDay','daysWeek','hoursYear','installYear','pumpAge','process']},
     {h:'System parameters',fields:['throttled','throttlePct','flowReading','prv','suctionP','dischargeP','suctionPipe','dischargePipe','negSuction','staticLift'],slots:['piping','valve','suctionGauge','dischargeGauge','suctionType','flowMeter']},
     {h:'On-site check',check:1}
   ]},
@@ -248,8 +250,24 @@ const pumpLabel = (p,i) => (p.pumpName||'').trim() || `Pump ${i+1}`;
 const $ = (s,el=document) => el.querySelector(s);
 const app = $('#app');
 
+/* 365/7 weeks in a year, so 24 hours for 7 days gives the usual 8,760. Pumps saved
+   before these fields existed keep their typed days per year and age. */
+const badRunning = p => { const h=num(p.hrsDay), d=num(p.daysWeek); return (h!==null&&(h<0||h>24))||(d!==null&&(d<0||d>7)); };
+function runningHours(p){
+  const h=num(p.hrsDay); if(h===null||badRunning(p)) return null;
+  const d=num(p.daysWeek); if(d!==null) return h*d*365/7;
+  const y=num(p.daysYear); return y===null?null:h*y;
+}
+/* Worked out at the visit's year, so an old visit's record stays as it was on the day. */
+function pumpAgeOf(p,date){
+  const y=num(p.installYear);
+  if(y===null) return blank(p.installYear)?num(p.pumpAge):null;
+  const at=parseInt(String(date||today()).slice(0,4),10);
+  return (!Number.isInteger(y)||y<1900||y>at)?null:at-y;
+}
+
 /* Derived figures shown on site so a bad reading is caught before leaving. Water only. */
-function calc(p){
+function calc(p,date){
   const amps=[p.ampL1,p.ampL2,p.ampL3].map(num).filter(a=>a!==null);
   const r={};
   if(amps.length){
@@ -257,6 +275,9 @@ function calc(p){
     if(amps.length>1) r.imbalance=Math.max(...amps.map(a=>Math.abs(a-r.amp)))/r.amp*100;
     const rated=num(p.ratedA); if(rated) r.loadPct=r.amp/rated*100;
   }
+  const hy=runningHours(p), age=pumpAgeOf(p,date);
+  if(hy!==null) r.hoursYear=Math.round(hy);
+  if(age!==null) r.pumpAge=age;
   r.isWater=/water/i.test(p.liquid||'');
   const ps=num(p.suctionP), pd=num(p.dischargeP), lift=p.negSuction==='Yes'?num(p.staticLift):null;
   if(r.isWater && pd!==null){
@@ -270,7 +291,7 @@ function calc(p){
 }
 function missing(p,photos){
   const out=[];
-  for(const k in F) if(F[k].key&&visible(F[k],p)&&blank(p[k])) out.push(F[k].l);
+  for(const k in F) if(isKey(F[k],p)&&visible(F[k],p)&&blank(p[k])) out.push(F[k].l);
   for(const s in SLOTS) if(isKey(SLOTS[s],p)&&visible(SLOTS[s],p)&&!photos.some(x=>x.slot===s)) out.push('Photo: '+SLOTS[s].l);
   return out;
 }
@@ -1110,6 +1131,7 @@ function fieldHTML(k,p){
   const d=F[k], val=p[k]??'';
   const cls='f'+(d.full?' full':'');
   const hide=visible(d,p)?'':' hidden';
+  if(d.calc) return `<div class="${cls}" data-show="${k}"${hide}><span class="lbl">${esc(d.l)}</span><div class="readout" id="r-${k}">—</div></div>`;
   if(d.seg) return `<div class="${cls}" data-show="${k}"${hide}><span class="lbl">${esc(d.l)}</span><div class="seg" role="group" aria-label="${esc(d.l)}">${
     d.seg.map(o=>`<button type="button" data-seg="${k}" data-val="${esc(o)}" aria-pressed="${val===o}">${esc(o)}</button>`).join('')}</div></div>`;
   if(d.area) return `<div class="${cls}" data-show="${k}"${hide}><label for="f-${k}">${esc(d.l)}</label><textarea class="in" id="f-${k}" data-k="${k}">${esc(val)}</textarea></div>`;
@@ -1146,7 +1168,7 @@ function checkHTML(p){
 }
 function stepDone(st,p,photos){
   return st.groups.every(g=>
-    (g.fields||[]).every(k=>!F[k].key||!visible(F[k],p)||!blank(p[k])) &&
+    (g.fields||[]).every(k=>!isKey(F[k],p)||!visible(F[k],p)||!blank(p[k])) &&
     (g.slots||[]).every(s=>!isKey(SLOTS[s],p)||!visible(SLOTS[s],p)||photos.some(x=>x.slot===s)));
 }
 function refreshPump(){
@@ -1158,6 +1180,7 @@ function refreshPump(){
     const need=el.querySelector('.need, .opt');
     if(need){ need.className=isKey(SLOTS[s],p)?'need':'opt'; need.textContent=isKey(SLOTS[s],p)?'Photo needed':''; }
   }
+  for(const k in F) if(F[k].calc){ const el=$('#r-'+k); if(el) el.textContent=F[k].calc(p,cur.visitDate); }
   const ch=$('#check'); if(ch) ch.innerHTML=checkHTML(p);
   const av=$('#avg'); if(av){ const a=calc(p).amp; av.textContent=a===undefined?'—':fmt(a,2)+' A'; }
   const mi=$('#missing');
@@ -1173,7 +1196,7 @@ async function renderPump(id,step,my){
   if(my!==routeToken) return;
   step=Math.min(Math.max(step,0),STEPS.length-1);
   const idx=siblings.findIndex(x=>x.id===id);
-  cur={pump:p,photos,idx,projectId:visit&&visit.projectId};
+  cur={pump:p,photos,idx,projectId:visit&&visit.projectId,visitDate:visit&&visit.date};
   const mayEdit=!!visit&&canEditVisit(visit);
   const st=STEPS[step];
   app.innerHTML=`
@@ -1332,7 +1355,7 @@ function drawForm(doc,v,p){
     doc.setDrawColor(150); doc.setLineWidth(.15); doc.rect(L,y,W,5.5);
     doc.setTextColor(40); doc.setFont('helvetica','bold'); doc.setFontSize(8.5); doc.text(t,L+2,y+3.9); y+=5.5;
   };
-  const r=calc(p);
+  const r=calc(p,v.date);
 
   band(COMPANY,[85,85,85],9,13,'center');
   band('ENERGY CHECK — SITE DATA COLLECTION FORM',[125,125,125],7,10.5,'center');
@@ -1348,8 +1371,9 @@ function drawForm(doc,v,p){
   sub('MOTOR NAMEPLATE');
   rf('motorBrand','motorModel'); rf('rpm','pole'); rf('power','motorEff'); rf('ratedV','ratedA');
   sub('OPERATING CONDITION');
-  rf('hrsDay','pumpAge');
-  row(F.daysYear.l,p.daysYear,'Tariff (RM/kWh)',v.tariff);
+  rf('hrsDay','daysWeek');
+  row(F.hoursYear.l,r.hoursYear===undefined?'':r.hoursYear.toLocaleString('en-US'),'Tariff (RM/kWh)',v.tariff);
+  row(F.installYear.l,p.installYear,F.pumpAge.l,r.pumpAge===undefined?'':r.pumpAge);
   const ph=[['L1',p.ampL1],['L2',p.ampL2],['L3',p.ampL3]].filter(a=>!blank(a[1])).map(a=>a[0]+' '+a[1]).join('  /  ');
   wide('Motor Amp Measured (A)',r.amp===undefined?'':`${fmt(r.amp,2)}   (${ph})`);
   const volts=[p.voltL1,p.voltL2,p.voltL3].filter(x=>!blank(x)).join(' / ');
@@ -1440,8 +1464,8 @@ async function buildZIP(j,visits,list,pdf,base,byDate){
     let dir=root, n=2;
     while(used.has(dir.toLowerCase())) dir=`${root} (${n++})`;
     used.add(dir.toLowerCase());
-    const counts={}, rec={visitId:p.visitId,visitDate:v.date||'',fields:{},calculated:calc(p),photos:[]};
-    for(const k in F) rec.fields[k]=visible(F[k],p)?(p[k]??''):'';
+    const counts={}, rec={visitId:p.visitId,visitDate:v.date||'',fields:{},calculated:calc(p,v.date),photos:[]};
+    for(const k in F) if(!F[k].calc) rec.fields[k]=visible(F[k],p)?(p[k]??''):'';
     for(const ph of photos){
       counts[ph.slot]=(counts[ph.slot]||0)+1;
       const path=`${dir}/${safe(SLOTS[ph.slot].l)} ${counts[ph.slot]}.jpg`;
