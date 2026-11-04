@@ -278,9 +278,10 @@ function missing(p,photos){
 /* ========== Storage (IndexedDB, this phone's working copy) ==========
    Screens only ever read and write here, so the app behaves the same with no
    signal. The sync section below moves changes to and from Firebase. */
-let dbh;
+let dbh, opening=null;
 function openDB(){
-  return new Promise((res,rej)=>{
+  if(opening) return opening;
+  opening=new Promise((res,rej)=>{
     const r=indexedDB.open('energy-check',3);
     r.onupgradeneeded=e=>{
       const d=r.result;
@@ -295,15 +296,40 @@ function openDB(){
         e.target.transaction.objectStore('visits').createIndex('projectId','projectId');
       }
     };
-    r.onsuccess=()=>{dbh=r.result;dbh.onversionchange=()=>dbh.close();res()};
-    r.onerror=()=>rej(r.error);
-  });
+    r.onsuccess=()=>{
+      const d=r.result; dbh=d;
+      /* a newer version in another tab, or the phone itself, can close this at any time */
+      d.onversionchange=()=>{ d.close(); if(dbh===d) dbh=null; };
+      d.onclose=()=>{ if(dbh===d) dbh=null; };
+      res();
+    };
+    r.onerror=()=>{
+      /* this page is older than the data on the phone: load the current version, once */
+      if(r.error&&r.error.name==='VersionError'&&!sessionStorage.getItem('ec-reloaded')){
+        sessionStorage.setItem('ec-reloaded','1'); location.reload(); return;
+      }
+      rej(r.error);
+    };
+  }).finally(()=>{ opening=null; });
+  return opening;
 }
-const req = (store,mode,fn) => new Promise((res,rej)=>{
-  const t=dbh.transaction(store,mode); let out;
-  const q=fn(t.objectStore(store)); q.onsuccess=()=>{out=q.result};
-  t.oncomplete=()=>res(out); t.onerror=t.onabort=()=>rej(t.error);
-});
+const connectionLost = e => !!e&&(e.name==='InvalidStateError'||/closing|lost|interrupted/i.test(e.message||''));
+/* All these requests are safe to repeat, so a lost connection is reopened and tried once more. */
+const req = async (store,mode,fn,retry=true) => {
+  try{
+    if(!dbh) await openDB();
+    return await new Promise((res,rej)=>{
+      const t=dbh.transaction(store,mode); let out;
+      const q=fn(t.objectStore(store)); q.onsuccess=()=>{out=q.result};
+      t.oncomplete=()=>res(out);
+      t.onerror=t.onabort=()=>rej(t.error||new Error('Storage was interrupted'));
+    });
+  }catch(e){
+    if(!retry||!connectionLost(e)) throw e;
+    dbh=null;
+    return req(store,mode,fn,false);
+  }
+};
 const get = (s,id) => req(s,'readonly',o=>o.get(id));
 const put = (s,v) => req(s,'readwrite',o=>o.put(v));
 const del = (s,id) => req(s,'readwrite',o=>o.delete(id));
@@ -649,7 +675,7 @@ async function route(keepScroll){
     else await renderHome(my);
     if(my===routeToken&&keepScroll!==true) scrollTo(0,0);
     paintStatus(); scheduleSync();
-  }catch(e){ console.error(e); app.innerHTML=`<main><div class="empty">Something went wrong: ${esc(e.message)}</div></main>`; }
+  }catch(e){ console.error(e); app.innerHTML=`<main><div class="empty">Something went wrong: ${esc(e.message)}<br><br>Your saved work is still on this phone.</div><button class="btn primary" onclick="location.reload()">Reload</button></main>`; }
 }
 addEventListener('hashchange',()=>route());
 const go = h => { location.hash=h; };

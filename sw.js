@@ -1,7 +1,7 @@
 /* Offline support: serve from cache immediately, refresh the cache in the
    background, so a phone with no signal still opens the app and the next
    load with signal picks up any new version. */
-const CACHE = 'energy-check-v5';
+const CACHE = 'energy-check-v6';
 const ASSETS = [
   './',
   './index.html',
