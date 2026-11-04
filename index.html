@@ -93,6 +93,15 @@ textarea.in{min-height:130px;resize:vertical}
 .item .side button+button{border-top:1px solid var(--line)}
 .pill{display:inline-block;margin-top:6px;font-size:12px;font-weight:700;padding:2px 8px;border-radius:99px;background:rgba(255,180,84,.16);color:var(--warn)}
 .pill.ok{background:rgba(76,210,138,.15);color:var(--ok)}
+#app.ro .pick,#app.ro .sign,#app.ro .edit-only{display:none}
+#app.ro .seg button{pointer-events:none}
+.in:disabled{opacity:.8;-webkit-text-fill-color:var(--ink)}
+.viewonly{background:rgba(255,180,84,.14);color:var(--warn);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:12px}
+.aibtn{margin-bottom:8px;background:none;border:1px solid var(--red);color:#ff8a9d}
+.aipic{display:block;width:100%;max-height:34vh;object-fit:contain;background:#000;border-radius:10px;margin-bottom:12px}
+.aiwas{font-size:12px;color:var(--warn);margin-top:3px}
+.grp{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:18px 2px 8px}
+.grp:first-child{margin-top:4px}
 .empty{text-align:center;color:var(--muted);padding:34px 16px}
 
 .check{display:grid;gap:8px}
@@ -126,6 +135,7 @@ textarea.in{min-height:130px;resize:vertical}
 <script src="vendor/firebase-auth-compat.js"></script>
 <script src="vendor/firebase-database-compat.js"></script>
 <script src="vendor/firebase-storage-compat.js"></script>
+<script src="vendor/firebase-functions-compat.js"></script>
 <script>
 'use strict';
 /* ========== Checklist definition ==========
@@ -133,7 +143,7 @@ textarea.in{min-height:130px;resize:vertical}
    extra:true marks fields that are not on the paper checklist.
    fresh:true marks site readings that "Copy" must not carry to the next pump. */
 const F = {
-  location:{l:'Energy Check Location',full:1},
+  location:{l:'Energy Check Location',full:1,list:'locs'},
   pumpName:{l:'Pump Name / ID (by Client)',full:1,key:1,fresh:1},
   qty:{l:'Qty of identical pumps',n:1,extra:1},
   pumpBrand:{l:'Pump Brand',key:1},
@@ -271,7 +281,7 @@ function missing(p,photos){
 let dbh;
 function openDB(){
   return new Promise((res,rej)=>{
-    const r=indexedDB.open('energy-check',2);
+    const r=indexedDB.open('energy-check',3);
     r.onupgradeneeded=e=>{
       const d=r.result;
       if(e.oldVersion<1){
@@ -280,8 +290,12 @@ function openDB(){
         d.createObjectStore('photos',{keyPath:'id'}).createIndex('pumpId','pumpId');
       }
       if(e.oldVersion<2) d.createObjectStore('base',{keyPath:'key'});
+      if(e.oldVersion<3){
+        d.createObjectStore('projects',{keyPath:'id'});
+        e.target.transaction.objectStore('visits').createIndex('projectId','projectId');
+      }
     };
-    r.onsuccess=()=>{dbh=r.result;res()};
+    r.onsuccess=()=>{dbh=r.result;dbh.onversionchange=()=>dbh.close();res()};
     r.onerror=()=>rej(r.error);
   });
 }
@@ -296,6 +310,7 @@ const del = (s,id) => req(s,'readwrite',o=>o.delete(id));
 const all = s => req(s,'readonly',o=>o.getAll());
 const by = (s,ix,v) => req(s,'readonly',o=>o.index(ix).getAll(v));
 const live = list => list.filter(x=>!x.deleted);
+const visitsOf = async id => live(await by('visits','projectId',id)).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||(b.createdAt||0)-(a.createdAt||0));
 const pumpsOf = async id => live(await by('pumps','visitId',id)).sort((a,b)=>a.order-b.order);
 const photosOf = async id => live(await by('photos','pumpId',id)).sort((a,b)=>a.createdAt-b.createdAt);
 
@@ -317,6 +332,42 @@ async function deleteVisit(id){
   for(const p of await pumpsOf(id)) await deletePump(p.id);
   const v=await get('visits',id); if(v) await softDelete('visits',v);
 }
+async function deleteProject(id){
+  for(const v of await visitsOf(id)) await deleteVisit(v.id);
+  const j=await get('projects',id); if(j) await softDelete('projects',j);
+}
+
+/* ========== Who can change what ==========
+   Everyone approved can view and export. A visit with its pumps and photos can be
+   changed by an admin, an EO coordinator or the person conducting it. Project
+   details can be changed by an admin, an EO coordinator or whoever created it.
+   database.rules.json in the Project Management repo enforces the same on the server. */
+const isPriv = () => !!me&&(me.roles||[]).some(r=>r==='admin'||r==='eoCoordinator');
+const conductorOf = v => v.conductedBy||v.createdBy;
+const canEditVisit = v => isPriv()||conductorOf(v)===me.uid;
+const canEditProject = j => isPriv()||j.createdBy===me.uid;
+let usersMap={};
+try{ usersMap=JSON.parse(localStorage.getItem('ec-users'))||{}; }catch(_){}
+const nameOf = id => usersMap[id]?.name||usersMap[id]?.email||(me&&id===me.uid?(me.name||me.email):'another user');
+function setRO(ro){
+  cur.ro=ro; app.classList.toggle('ro',ro);
+  if(ro) app.querySelectorAll('[data-k],[data-j],[data-v],[data-cond]').forEach(el=>el.disabled=true);
+}
+/* False once this phone holds edits it is no longer allowed to send, e.g. the visit was reassigned. */
+async function mayPush(s,o,base){
+  if(isPriv()) return true;
+  const isNew=!Object.keys(base).length;
+  if(s==='projects') return isNew||base.createdBy===me.uid;
+  if(s==='visits') return isNew?conductorOf(o)===me.uid:conductorOf(base)===me.uid;
+  const v=await get('visits',o.visitId);
+  return !!v&&conductorOf(v)===me.uid;
+}
+async function revert(s,o,base){
+  if(Object.keys(base).length) await put(s,{...base,id:o.id});
+  else await del(s,o.id);
+  toast('Your change was not saved: you can no longer edit this visit.');
+  remoteChanged();
+}
 
 /* ========== Sync (Firebase) ==========
    All logged-in users share one data set under pm/energyCheck in the Project
@@ -333,10 +384,10 @@ const FB_CONFIG={
   messagingSenderId:"927981622689",
   appId:"1:927981622689:web:8955bab23c76489e42e7e0"
 };
-const ROOT='pm/energyCheck/', STORES=['visits','pumps'], LOCAL_ONLY=new Set(['id','updatedAt','updatedBy']);
+const ROOT='pm/energyCheck/', STORES=['projects','visits','pumps'], LOCAL_ONLY=new Set(['id','updatedAt','updatedBy']);
 const KEEP_BLOB_MS=30*864e5;
 let auth,fdb,fst,me=null,started=false,online=false,syncing=0;
-let syncQ=Promise.resolve(),syncT=null,pendingN=0,pendingVisits=new Set(),syncErr='';
+let syncQ=Promise.resolve(),syncT=null,pendingN=0,pendingProjects=new Set(),loaded=false,syncErr='';
 const serial = fn => (syncQ=syncQ.then(fn).catch(e=>{ console.warn(e); syncErr=e.code||e.message; paintStatus(); }));
 const same = (a,b) => (a??'')===(b??'');
 function diff(o,base){
@@ -347,13 +398,16 @@ function diff(o,base){
 }
 const baseOf = async (s,id) => (await get('base',s+'/'+id))?.data||{};
 /* A visit just opened with nothing in it stays on this phone until it has something to share. */
-const heldBack = async (s,o) => s==='visits'&&!o.deleted&&blank(o.company)&&!(await pumpsOf(o.id)).length&&!(await get('base','visits/'+o.id));
+const heldBack = async (s,o) => s==='visits'&&!o.deleted&&!o.signature&&!(await pumpsOf(o.id)).length&&!(await get('base','visits/'+o.id));
 async function scanPending(){
-  let n=0; const vs=new Set();
+  let n=0; const js=new Set(), vis={};
+  for(const v of await all('visits')) vis[v.id]=v.projectId;
   for(const s of STORES) for(const o of await all(s))
-    if(!(await heldBack(s,o))&&(o.deleted||Object.keys(diff(o,await baseOf(s,o.id))).length)){ n++; vs.add(s==='visits'?o.id:o.visitId); }
-  for(const ph of await all('photos')) if(!ph.url||ph.deleted){ n++; vs.add(ph.visitId); }
-  pendingN=n; pendingVisits=vs; paintStatus();
+    if(!(await heldBack(s,o))&&(o.deleted||Object.keys(diff(o,await baseOf(s,o.id))).length)){
+      n++; js.add(s==='projects'?o.id:s==='visits'?o.projectId:vis[o.visitId]);
+    }
+  for(const ph of await all('photos')) if(!ph.url||ph.deleted){ n++; js.add(vis[ph.visitId]); }
+  pendingN=n; pendingProjects=js; paintStatus();
 }
 function paintStatus(){
   document.querySelectorAll('#saved').forEach(el=>{
@@ -376,20 +430,30 @@ async function pushAll(){
   if(!me||!online||!pendingN){ if(pendingN&&me) scheduleSync(30000); return; }
   syncErr='';
   const stamp=()=>({updatedAt:firebase.database.ServerValue.TIMESTAMP,updatedBy:me.email});
-  for(const s of STORES) for(const o of await all(s)){
+  const pushRec=async(s,o)=>{
     const base=await baseOf(s,o.id), d=diff(o,base);
-    if((!Object.keys(d).length&&!o.deleted)||await heldBack(s,o)) continue;
-    await fdb.ref(ROOT+s+'/'+o.id).update({...d,...stamp()});
-    if(o.deleted){ await del(s,o.id); await del('base',s+'/'+o.id); }
-    else await put('base',{key:s+'/'+o.id,data:{...base,...d}});
-  }
+    if((!Object.keys(d).length&&!o.deleted)||await heldBack(s,o)) return;
+    try{
+      if(!(await mayPush(s,o,base))){ await revert(s,o,base); return; }
+      await fdb.ref(ROOT+s+'/'+o.id).update({...d,...stamp()});
+      if(o.deleted){ await del(s,o.id); await del('base',s+'/'+o.id); }
+      else await put('base',{key:s+'/'+o.id,data:{...base,...d}});
+    }catch(e){ console.warn(s,o.id,e); syncErr=e.code||e.message; }
+  };
+  for(const s of STORES) for(const o of await all(s)) if(!o.deleted) await pushRec(s,o);
   for(const ph of await all('photos')){
-    if(ph.deleted){
-      await fdb.ref(ROOT+'photos/'+ph.id).update({deleted:true,...stamp()});
-      if(ph.storagePath) await fst.ref(ph.storagePath).delete().catch(e=>console.warn(e));
-      await del('photos',ph.id);
-    } else if(!ph.url){
-      try{
+    if(ph.url&&!ph.deleted) continue;
+    try{
+      if(!(await mayPush('photos',ph,{}))){
+        if(ph.deleted){ delete ph.deleted; await put('photos',ph); }
+        else if(!ph.url){ await del('photos',ph.id); toast('Your photo was not saved: you can no longer edit this visit.'); }
+        continue;
+      }
+      if(ph.deleted){
+        await fdb.ref(ROOT+'photos/'+ph.id).update({deleted:true,...stamp()});
+        if(ph.storagePath) await fst.ref(ph.storagePath).delete().catch(e=>console.warn(e));
+        await del('photos',ph.id);
+      } else if(!ph.url){
         const path=`${ROOT}${ph.visitId}/${ph.id}.jpg`;
         const snap=await fst.ref(path).put(ph.blob,{contentType:'image/jpeg'});
         const url=await snap.ref.getDownloadURL();
@@ -400,9 +464,11 @@ async function pushAll(){
         now.url=url; now.storagePath=path;
         await put('photos',now);
         if(cur.photos){ const m=cur.photos.find(x=>x.id===ph.id); if(m){ m.url=url; m.storagePath=path; } }
-      }catch(e){ console.warn(e); syncErr=e.code||e.message; }
-    }
+      }
+    }catch(e){ console.warn(e); syncErr=e.code||e.message; }
   }
+  /* children first: a pump's marker needs its visit still in place to be allowed */
+  for(const s of [...STORES].reverse()) for(const o of await all(s)) if(o.deleted) await pushRec(s,o);
   await scanPending();
   if(pendingN) scheduleSync(30000);
 }
@@ -415,12 +481,12 @@ async function mergeRemote(s,id,val){
     if(rec){
       await del(s,id); await del('base',key);
       if(s==='pumps') for(const ph of await by('photos','pumpId',id)) await del('photos',ph.id);
-      if(cur.pump&&(cur.pump.id===id||(s==='visits'&&cur.pump.visitId===id))){
-        toast('This was deleted by another user');
-        const to=s==='pumps'?'#/v/'+cur.pump.visitId:'#/';
-        cur={}; pending=null; location.replace(to); return;
-      }
-      if(cur.visit&&s==='visits'&&cur.visit.id===id){ toast('This visit was deleted by another user'); cur={}; pending=null; location.replace('#/'); return; }
+      /* whoever has the deleted record open moves up to the nearest screen that still exists */
+      let to=null;
+      if(s==='projects'&&(cur.projectId===id||cur.project?.id===id)) to='#/';
+      if(s==='visits'&&(cur.visit?.id===id||cur.pump?.visitId===id)) to='#/j/'+(rec.projectId||'');
+      if(s==='pumps'&&cur.pump?.id===id) to='#/v/'+cur.pump.visitId;
+      if(to){ toast('This was deleted by another user'); cur={}; pending=null; location.replace(to); return; }
       remoteChanged();
     }
     return;
@@ -441,6 +507,28 @@ async function mergeRemote(s,id,val){
   await put('base',{key,data:val});
   applyLive(s,id,adopted,b);
   remoteChanged();
+  if(s==='visits'&&'conductedBy' in adopted&&cur.pump?.visitId===id) route(true);
+  if(s==='visits'&&loaded&&!out.projectId) serial(()=>migrateVisits(false));
+}
+/* Visits made before projects existed. Each customer's old visits go into one project.
+   The id comes from the customer name, so two phones doing this end up with the same project. */
+async function migrateVisits(onlyUnsynced){
+  let changed=false;
+  for(const v of live(await all('visits'))){
+    if(v.projectId||(onlyUnsynced&&await get('base','visits/'+v.id))||!canEditVisit(v)) continue;
+    if(blank(v.company)&&!(await pumpsOf(v.id)).length) continue;
+    const id='legacy-'+(String(v.company||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'unnamed');
+    let j=await get('projects',id);
+    if(!j){
+      j={id,company:v.company||'',name:'',tariff:v.tariff||'',createdBy:v.createdBy||me.uid,createdAt:v.createdAt||Date.now(),updatedAt:Date.now()};
+      await put('projects',j);
+    } else if(blank(j.tariff)&&!blank(v.tariff)){ j.tariff=v.tariff; await put('projects',j); }
+    v.projectId=id;
+    v.conductedBy=conductorOf(v)||me.uid;
+    await put('visits',v);
+    changed=true;
+  }
+  if(changed){ remoteChanged(); scheduleSync(); }
 }
 async function mergePhoto(id,val){
   const rec=await get('photos',id);
@@ -463,13 +551,13 @@ async function mergePhoto(id,val){
 }
 /* Put another user's edit on the open form, without touching what is being typed. */
 function applyLive(s,id,adopted,b){
-  const o=s==='pumps'?cur.pump:cur.visit;
+  const o={pumps:cur.pump,visits:cur.visit,projects:cur.project}[s];
   if(!o||o.id!==id) return;
   for(const k in adopted){
     if(!same(o[k],b[k])) continue;
     if(adopted[k]===undefined) delete o[k]; else o[k]=adopted[k];
     const val=o[k]??'';
-    const el=s==='pumps'?$('#f-'+k):app.querySelector(`[data-v="${k}"]`);
+    const el=s==='pumps'?$('#f-'+k):app.querySelector(`[data-v="${k}"],[data-j="${k}"]`);
     if(el&&el!==document.activeElement) el.value=val;
     if(s==='pumps') app.querySelectorAll(`[data-seg="${k}"]`).forEach(x=>x.setAttribute('aria-pressed',x.dataset.val===val));
   }
@@ -486,7 +574,7 @@ function remoteChanged(){
     route(true);
   },400);
 }
-const LISTEN=['visits','pumps','photos'];
+const LISTEN=['projects','visits','pumps','photos'];
 function startSync(){
   for(const s of LISTEN){
     const q=fdb.ref(ROOT+s), h=snap=>serial(()=>mergeRemote(s,snap.key,snap.val()));
@@ -498,12 +586,21 @@ function startSync(){
     online=!!snap.val(); paintStatus();
     if(online) scheduleSync(0);
   });
+  fdb.ref('pm/users').once('value').then(snap=>{
+    const out={}, u=snap.val()||{};
+    for(const id in u) out[id]={name:u[id].name||'',email:u[id].email||'',ok:normRoles(u[id]).length>0};
+    usersMap=out;
+    localStorage.setItem('ec-users',JSON.stringify(out));
+    remoteChanged();
+  }).catch(e=>console.warn(e));
   serial(pruneBlobs);
+  serial(()=>migrateVisits(true));
+  fdb.ref(ROOT+'visits').once('value').then(()=>{ loaded=true; serial(()=>migrateVisits(false)); }).catch(e=>console.warn(e));
 }
 function stopSync(){
   for(const s of LISTEN) fdb.ref(ROOT+s).off();
   fdb.ref('.info/connected').off();
-  clearTimeout(syncT); online=false;
+  clearTimeout(syncT); online=false; loaded=false;
 }
 /* Uploaded photos stay on the phone for 30 days, then load from the cloud when viewed. */
 async function pruneBlobs(){
@@ -546,7 +643,8 @@ async function route(keepScroll){
   clearUrls();
   const [,kind,id,step]=(location.hash||'#/').split('/');
   try{
-    if(kind==='v') await renderVisit(id,my);
+    if(kind==='j') await renderProject(id,my);
+    else if(kind==='v') await renderVisit(id,my);
     else if(kind==='p') await renderPump(id,+step||0,my);
     else await renderHome(my);
     if(my===routeToken&&keepScroll!==true) scrollTo(0,0);
@@ -561,7 +659,7 @@ const AUTH_ERR={'auth/invalid-email':'Invalid email','auth/user-not-found':'No s
 const authErr = e => AUTH_ERR[e.code]||'Sign-in failed';
 let signupName='';
 function renderLogin(signup){
-  routeToken++; cur={};
+  routeToken++; cur={}; app.classList.remove('ro');
   app.innerHTML=`
   <header><div class="hrow"><h1 class="brand">Energy Check</h1></div></header>
   <main><form class="card" id="lf"><h2>${signup?'Create account':'Sign in'}</h2>
@@ -599,7 +697,7 @@ function renderLogin(signup){
   };
 }
 function renderMessage(title,msg,again){
-  routeToken++; cur={};
+  routeToken++; cur={}; app.classList.remove('ro');
   app.innerHTML=`
   <header><div class="hrow"><h1 class="brand">Energy Check</h1></div></header>
   <main><div class="card"><h2>${esc(title)}</h2><p class="note" style="margin-bottom:14px">${esc(msg)}</p>
@@ -651,94 +749,219 @@ async function signOut(){
   if(pendingN) return toast(`${pendingN} change${pendingN===1?' has':'s have'} not synced yet. Connect to signal first.`);
   if(!confirm('Sign out of this phone? Photos saved here will be removed from the phone. Everything stays in the cloud.')) return;
   stopSync(); started=false;
-  await Promise.all(['visits','pumps','photos','base'].map(s=>req(s,'readwrite',o=>o.clear())));
+  await Promise.all(['projects','visits','pumps','photos','base'].map(s=>req(s,'readwrite',o=>o.clear())));
   localStorage.removeItem('ec-me-'+me.uid);
+  localStorage.removeItem('ec-users');
   me=null;
   await auth.signOut();
 }
 
-/* ========== Home: list of site visits ========== */
+/* ========== Home: projects grouped by customer ========== */
+const custKey = c => String(c||'').trim().toLowerCase();
+const projTitle = j => (j.name||'').trim()||(j.company||'').trim()||'(No customer name)';
 async function renderHome(my){
-  const vs=live(await all('visits')), rows=[];
-  for(const v of vs){
-    const pumps=await pumpsOf(v.id);
-    /* a visit opened by this user and left completely empty */
-    if(blank(v.company)&&!pumps.length&&!v.signature&&v.createdBy===me.uid&&Date.now()-v.createdAt>5000){ await deleteVisit(v.id); continue; }
-    rows.push({v,pumps});
+  const rows=[];
+  for(const j of live(await all('projects'))){
+    const visits=await visitsOf(j.id);
+    let pumps=0;
+    for(const v of visits) pumps+=(await pumpsOf(v.id)).length;
+    rows.push({j,visits,pumps,last:visits[0]?.date||''});
   }
-  rows.sort((a,b)=>String(b.v.date||'').localeCompare(String(a.v.date||''))||(b.v.createdAt||0)-(a.v.createdAt||0));
   await scanPending();
   if(my!==routeToken) return;
-  cur={};
+  cur={}; setRO(false);
+  const groups=new Map();
+  for(const r of rows){
+    const k=custKey(r.j.company);
+    if(!groups.has(k)) groups.set(k,{name:(r.j.company||'').trim()||'(No customer name)',rows:[]});
+    groups.get(k).rows.push(r);
+  }
+  const sorted=[...groups.values()].sort((a,b)=>a.name.localeCompare(b.name));
+  for(const g of sorted) g.rows.sort((a,b)=>b.last.localeCompare(a.last)||projTitle(a.j).localeCompare(projTitle(b.j)));
   const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone;
   app.innerHTML=`
   <header><div class="hrow"><h1 class="brand">Energy Check</h1><span class="saved" id="saved"></span><button class="hbtn" id="so">Sign out</button></div></header>
   <main>
-    <div class="list">${rows.map(({v,pumps})=>{
-      const wait=pendingVisits.has(v.id);
-      return `<div class="item"><button class="main" data-open="${v.id}">
-        <div class="t">${esc(v.company||'(No company name)')}</div>
-        <div class="s">${esc(v.date||'')} · ${pumps.length} pump${pumps.length===1?'':'s'}</div>
-        ${v.surveyor?`<div class="s">${esc(v.surveyor)}</div>`:''}
+    ${sorted.map(g=>`<div class="grp">${esc(g.name)}</div><div class="list">${g.rows.map(({j,visits,pumps,last})=>{
+      const wait=pendingProjects.has(j.id);
+      return `<div class="item"><button class="main" data-project="${esc(j.id)}">
+        <div class="t">${esc((j.name||'').trim()||'General')}</div>
+        <div class="s">${visits.length} visit${visits.length===1?'':'s'} · ${pumps} pump${pumps===1?'':'s'}${last?` · last ${esc(dmy(last))}`:''}</div>
         <span class="pill ${wait?'':'ok'}">${wait?'Waiting to sync':'Synced'}</span>
-      </button></div>`;}).join('')||
-      '<div class="empty">No site visits yet.<br>Start one when you reach the site.</div>'}</div>
-    <button class="btn primary" id="newV">+ New site visit</button>
-    <p class="note" style="margin-top:14px">Signed in as ${esc(me.email)}. All staff see the same visits. With no signal, your work is saved on this phone and syncs when you are back online.</p>
+      </button></div>`;}).join('')}</div>`).join('')||
+      '<div class="empty">No projects yet.<br>Add one when you reach the site.</div>'}
+    <button class="btn primary" id="newP">+ New project</button>
+    <p class="note" style="margin-top:14px">Signed in as ${esc(me.email)}. All staff see the same projects. With no signal, your work is saved on this phone and syncs when you are back online.</p>
     ${standalone?'':'<p class="note" style="margin-top:8px">Add this page to your Home Screen so it opens with no signal.</p>'}
   </main>`;
   $('#so').onclick=signOut;
-  $('#newV').onclick=async()=>{
-    const v={id:uid(),company:'',date:today(),surveyor:me.name||'',tariff:'',signature:'',createdBy:me.uid,createdAt:Date.now(),updatedAt:Date.now()};
-    await put('visits',v);
+  app.querySelectorAll('[data-project]').forEach(b=>b.onclick=()=>go('#/j/'+b.dataset.project));
+  $('#newP').onclick=()=>newProjectSheet(sorted.map(g=>g.name).filter(n=>n!=='(No customer name)'));
+}
+function newProjectSheet(customers){
+  const o=sheet(`<h3>New project</h3>
+    <div class="grid" style="margin:12px 0">
+      <div class="f full"><label for="npC">Customer</label><input class="in" id="npC" list="custs" autocomplete="off" autocapitalize="words"><datalist id="custs">${customers.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></div>
+      <div class="f full"><label for="npN">Project (site or area)</label><input class="in" id="npN" placeholder="e.g. East Sector" autocomplete="off" autocapitalize="words"></div>
+    </div>
+    <p class="err" id="npE"></p>
+    <button class="btn primary" id="npGo">Create project</button>
+    <button class="btn ghost" id="npX">Cancel</button>`);
+  $('#npX',o).onclick=()=>o.remove();
+  $('#npGo',o).onclick=async()=>{
+    const company=$('#npC',o).value.trim(), name=$('#npN',o).value.trim();
+    if(!company){ $('#npE',o).textContent='Enter the customer name'; return; }
+    /* use the spelling already on file, so the same customer stays in one group */
+    const known=customers.find(c=>custKey(c)===custKey(company));
+    const j={id:uid(),company:known||company,name,tariff:'',createdBy:me.uid,createdAt:Date.now(),updatedAt:Date.now()};
+    await put('projects',j);
     try{ navigator.storage.persist&&navigator.storage.persist(); }catch(_){}
+    o.remove();
+    go('#/j/'+j.id);
+  };
+  $('#npC',o).focus();
+}
+
+/* ========== Project: its visits, and all its pumps by location ========== */
+const groupByLocation = items => {
+  const m=new Map();
+  for(const it of items){
+    const name=(it.p.location||'').trim(), k=name.toLowerCase();
+    if(!m.has(k)) m.set(k,{name:name||'No location given',items:[],none:!name});
+    m.get(k).items.push(it);
+  }
+  return [...m.values()].sort((a,b)=>a.none-b.none||a.name.localeCompare(b.name));
+};
+async function renderProject(id,my){
+  const j=await get('projects',id);
+  if(!j||j.deleted){ location.replace('#/'); return; }
+  const visits=[], allPumps=[];
+  for(const v of await visitsOf(id)){
+    const pumps=await pumpsOf(v.id);
+    /* a visit this user opened and left empty */
+    if(!pumps.length&&!v.signature&&v.createdBy===me.uid&&Date.now()-v.createdAt>5000&&!(await get('base','visits/'+v.id))){ await del('visits',v.id); continue; }
+    visits.push({v,pumps});
+    pumps.forEach((p,i)=>allPumps.push({p,v,label:pumpLabel(p,i)}));
+  }
+  if(my!==routeToken) return;
+  cur={project:j,projectId:j.id};
+  const locs=groupByLocation(allPumps);
+  const mayEdit=canEditProject(j);
+  /* deleting a project takes its visits with it, so a creator can only do it if they are all theirs */
+  const mayDelete=isPriv()||(j.createdBy===me.uid&&visits.every(x=>conductorOf(x.v)===me.uid));
+  app.innerHTML=`
+  <header><div class="hrow"><button class="hback" aria-label="Back" id="bk">‹</button><h1 id="jt">${esc(projTitle(j))}</h1><span class="saved" id="saved"></span></div></header>
+  <main>
+    <div class="card"><h2>Project</h2>${mayEdit?'':'<div class="viewonly">Only an admin, an EO coordinator or the person who created this project can change these details. You can still add your own visit.</div>'}<div class="grid">
+      <div class="f full"><label for="jc">Customer</label><input class="in" id="jc" data-j="company" value="${esc(j.company)}" autocomplete="off"></div>
+      <div class="f full"><label for="jn">Project (site or area)</label><input class="in" id="jn" data-j="name" value="${esc(j.name)}" placeholder="e.g. East Sector" autocomplete="off"></div>
+      <div class="f full"><label for="jt2">Tariff (RM/kWh)</label><input class="in" id="jt2" data-j="tariff" inputmode="decimal" value="${esc(j.tariff)}"></div>
+    </div></div>
+
+    <div class="grp">Visits</div>
+    <div class="list">${visits.map(({v,pumps})=>{
+      const where=[...new Set(pumps.map(p=>(p.location||'').trim()).filter(Boolean))];
+      return `<div class="item"><button class="main" data-visit="${esc(v.id)}">
+        <div class="t">${esc(dmy(v.date)||'No date')}</div>
+        <div class="s">${pumps.length} pump${pumps.length===1?'':'s'} · ${esc(nameOf(conductorOf(v)))}</div>
+        ${where.length?`<div class="s">${esc(where.join(', '))}</div>`:''}
+      </button></div>`;}).join('')||'<div class="empty">No visits yet.</div>'}</div>
+    <button class="btn primary" id="newV">+ New visit</button>
+
+    ${locs.length?`<div class="grp">Pumps by location</div>${locs.map(g=>`
+      <div class="card loc"><h2>${esc(g.name)}</h2><div class="list" style="margin:0">${g.items.map(({p,v,label})=>`
+        <div class="item" style="background:var(--raise)"><button class="main" data-pump="${esc(p.id)}">
+          <div class="t">${esc(label)}</div>
+          <div class="s">${esc(dmy(v.date))}${p.pumpModel?` · ${esc(p.pumpModel)}`:''}</div>
+        </button></div>`).join('')}</div></div>`).join('')}`:''}
+
+    <button class="btn" id="expJ" style="margin-top:14px" ${allPumps.length?'':'disabled'}>Export whole project</button>
+    ${mayDelete?'<button class="btn danger" id="delJ">Delete this project</button>':''}
+  </main>`;
+  setRO(!mayEdit);
+  $('#bk').onclick=()=>go('#/');
+  app.querySelectorAll('[data-j]').forEach(el=>el.oninput=()=>{
+    j[el.dataset.j]=el.value;
+    $('#jt').textContent=projTitle(j);
+    queueSave('projects',j);
+  });
+  app.querySelectorAll('[data-visit]').forEach(b=>b.onclick=()=>go('#/v/'+b.dataset.visit));
+  app.querySelectorAll('[data-pump]').forEach(b=>b.onclick=()=>go('#/p/'+b.dataset.pump+'/0'));
+  $('#newV').onclick=async()=>{
+    const v={id:uid(),projectId:j.id,date:today(),surveyor:me.name||'',signature:'',conductedBy:me.uid,createdBy:me.uid,createdAt:Date.now(),updatedAt:Date.now()};
+    await put('visits',v);
     go('#/v/'+v.id);
   };
-  app.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>go('#/v/'+b.dataset.open));
+  $('#expJ').onclick=()=>allPumps.length&&exportVisits(j.id,visits.map(x=>x.v.id),true);
+  if($('#delJ')) $('#delJ').onclick=async()=>{
+    if(!confirm(`Delete "${projTitle(j)}" with ${visits.length} visit(s), ${allPumps.length} pump(s) and all photos, for all users? This cannot be undone.`)) return;
+    pending=null; clearTimeout(timer);
+    await deleteProject(j.id);
+    go('#/');
+  };
 }
 
 /* ========== Visit: details, pump list, signature, export ========== */
 async function renderVisit(id,my){
   const v=await get('visits',id);
   if(!v||v.deleted){ location.replace('#/'); return; }
+  const j=await get('projects',v.projectId);
+  if(!j||j.deleted){ location.replace('#/'); return; }
   const pumps=await pumpsOf(id);
   const info=[];
-  for(const p of pumps){ const ph=await photosOf(p.id); info.push({p,ph,miss:missing(p,ph)}); }
+  for(let i=0;i<pumps.length;i++){ const p=pumps[i], ph=await photosOf(p.id); info.push({p,ph,miss:missing(p,ph),label:pumpLabel(p,i)}); }
   if(my!==routeToken) return;
-  cur={visit:v};
+  cur={visit:v,projectId:j.id};
+  const groups=groupByLocation(info);
+  const mayEdit=canEditVisit(v), conductor=conductorOf(v);
+  const staff=Object.entries(usersMap).filter(([id,u])=>u.ok||id===conductor).sort((a,b)=>nameOf(a[0]).localeCompare(nameOf(b[0])));
+  if(!staff.some(([id])=>id===conductor)) staff.push([conductor,{}]);
   app.innerHTML=`
-  <header><div class="hrow"><button class="hback" aria-label="Back" id="bk">‹</button><h1>${esc(v.company||'New site visit')}</h1><span class="saved" id="saved"></span></div></header>
+  <header><div class="hrow"><button class="hback" aria-label="Back" id="bk">‹</button><h1 id="vt">${esc(dmy(v.date)||'New visit')}</h1><span class="saved" id="saved"></span></div></header>
   <main>
-    <div class="card"><h2>Site visit</h2><div class="grid">
-      <div class="f full"><label for="company">Company Name</label><input class="in" id="company" data-v="company" value="${esc(v.company)}" autocomplete="organization"></div>
-      <div class="f"><label for="date">Visit Date</label><input class="in" id="date" type="date" data-v="date" value="${esc(v.date)}"></div>
-      <div class="f"><label for="tariff">Tariff (RM/kWh)</label><input class="in" id="tariff" inputmode="decimal" data-v="tariff" value="${esc(v.tariff)}"></div>
-    </div></div>
+    <div class="card"><h2>Visit</h2>
+      ${mayEdit?'':`<div class="viewonly">View only. This visit can be changed by ${esc(nameOf(conductor))}, an EO coordinator or an admin.</div>`}
+      <p class="note" style="margin-bottom:12px">${esc((j.company||'').trim()||'(No customer name)')}${(j.name||'').trim()?` · ${esc(j.name.trim())}`:''}</p>
+      <div class="f" style="margin-bottom:12px"><label for="date">Visit Date</label><input class="in" id="date" type="date" data-v="date" value="${esc(v.date)}"></div>
+      <div class="f"><label for="cond">Conducted by</label>${isPriv()
+        ?`<select class="in" id="cond" data-cond="1">${staff.map(([id])=>`<option value="${esc(id)}"${id===conductor?' selected':''}>${esc(nameOf(id))}</option>`).join('')}</select>`
+        :`<div class="readout">${esc(nameOf(conductor))}</div>`}</div>
+    </div>
 
-    <div class="list">${info.map(({p,ph,miss},i)=>`
+    ${groups.map(g=>`${groups.length>1||!g.none?`<div class="grp">${esc(g.name)}</div>`:''}<div class="list">${g.items.map(({p,ph,miss,label})=>`
       <div class="item"><button class="main" data-pump="${p.id}">
-        <div class="t">${esc(pumpLabel(p,i))}</div>
+        <div class="t">${esc(label)}</div>
         <div class="s">${esc([p.pumpBrand,p.pumpModel,p.power&&p.power+' kW'].filter(Boolean).join(' · ')||'No nameplate data yet')}</div>
         <div class="s">${ph.length} photo${ph.length===1?'':'s'}</div>
         <span class="pill ${miss.length?'':'ok'}">${miss.length?miss.length+' item'+(miss.length===1?'':'s')+' missing':'Complete'}</span>
-      </button><div class="side"><button data-dup="${p.id}">Copy</button>${canDelete(p,v)?`<button data-delp="${p.id}">Delete</button>`:''}</div></div>`).join('')}</div>
-    <button class="btn primary" id="addP">+ Add pump</button>
-    <p class="note" style="margin:8px 0 14px">Copy starts a new pump with the same nameplate details. Readings and photos stay blank.</p>
+      </button><div class="side"><button data-dup="${p.id}">Copy</button><button data-delp="${p.id}">Delete</button></div></div>`).join('')}</div>`).join('')}
+    <button class="btn primary edit-only" id="addP">+ Add pump</button>
+    <p class="note edit-only" style="margin:8px 0 14px">Copy starts a new pump with the same nameplate details and location. Readings and photos stay blank.</p>
 
     <div class="card"><h2>Surveyed by</h2>
       <div class="f" style="margin-bottom:12px"><label for="surveyor">Name</label><input class="in" id="surveyor" data-v="surveyor" value="${esc(v.surveyor)}" autocomplete="name"></div>
       <div class="lbl note" style="margin-bottom:6px;font-weight:600">Signature</div>
       <canvas class="sigpad" id="sig" width="700" height="260" aria-label="Signature pad"></canvas>
-      <button class="btn ghost" id="sigClear" style="margin-top:8px">Clear signature</button>
+      <button class="btn ghost edit-only" id="sigClear" style="margin-top:8px">Clear signature</button>
     </div>
 
-    <button class="btn primary" id="exp" ${pumps.length?'':'disabled style="opacity:.5"'}>Export PDF &amp; photos</button>
-    ${canDelete(v)?'<button class="btn danger" id="delV">Delete this visit</button>':''}
+    <button class="btn primary" id="exp" ${pumps.length?'':'disabled style="opacity:.5"'}>Export this visit</button>
+    ${mayEdit?'<button class="btn danger" id="delV">Delete this visit</button>':''}
   </main>`;
-  $('#bk').onclick=()=>go('#/');
+  setRO(!mayEdit);
+  app.classList.toggle('noside',!mayEdit);
+  app.querySelectorAll('.item .side').forEach(x=>{ if(!mayEdit) x.remove(); });
+  $('#bk').onclick=()=>go('#/j/'+j.id);
+  if($('#cond')) $('#cond').onchange=e=>{
+    const old=conductorOf(v), to=e.target.value;
+    v.conductedBy=to;
+    /* the printed "Surveyed By" follows unless someone typed a different name */
+    if(blank(v.surveyor)||v.surveyor===nameOf(old)){ v.surveyor=nameOf(to)==='another user'?'':nameOf(to); $('#surveyor').value=v.surveyor; }
+    queueSave('visits',v);
+  };
   app.querySelectorAll('[data-v]').forEach(el=>el.oninput=()=>{
     v[el.dataset.v]=el.value;
-    if(el.dataset.v==='company') $('h1').textContent=el.value||'New site visit';
+    if(el.dataset.v==='date') $('#vt').textContent=dmy(el.value)||'New visit';
     queueSave('visits',v);
   });
   $('#addP').onclick=async()=>{
@@ -763,27 +986,26 @@ async function renderVisit(id,my){
     await deletePump(b.dataset.delp);
     route(true);
   });
-  setupSignature(v);
-  $('#exp').onclick=()=>pumps.length&&exportVisit(v.id);
+  setupSignature(v,mayEdit);
+  $('#exp').onclick=()=>pumps.length&&exportVisits(j.id,[v.id],false);
   if($('#delV')) $('#delV').onclick=async()=>{
-    if(!confirm(`Delete the whole visit "${v.company||'unnamed'}" with ${pumps.length} pump(s) and all photos, for all users? This cannot be undone.`)) return;
+    if(!confirm(`Delete the visit on ${dmy(v.date)||'this date'} with ${pumps.length} pump(s) and all photos, for all users? This cannot be undone.`)) return;
     pending=null; clearTimeout(timer);
     await deleteVisit(v.id);
-    go('#/');
+    go('#/j/'+j.id);
   };
 }
-/* Anyone can edit. Deleting is limited to whoever created the record, or an admin. */
-const canDelete = (o,parent) => me.isAdmin||o.createdBy===me.uid||(parent&&parent.createdBy===me.uid);
 function newPump(visitId,order){
   const p={id:uid(),visitId,order,createdBy:me.uid,createdAt:Date.now(),updatedAt:Date.now()};
   for(const k in F) if(F[k].def) p[k]=F[k].def;
   return p;
 }
-function setupSignature(v){
+function setupSignature(v,mayEdit){
   const c=$('#sig'), g=c.getContext('2d');
   const paper=()=>{ g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); };
   paper();
   if(v.signature){ const im=new Image(); im.onload=()=>g.drawImage(im,0,0,c.width,c.height); im.src=v.signature; }
+  if(!mayEdit) return;
   g.lineWidth=4; g.lineCap='round'; g.lineJoin='round'; g.strokeStyle='#111';
   let drawing=false;
   const at=e=>{ const r=c.getBoundingClientRect(); return [(e.clientX-r.left)*c.width/r.width,(e.clientY-r.top)*c.height/r.height]; };
@@ -791,6 +1013,70 @@ function setupSignature(v){
   c.onpointermove=e=>{ if(!drawing) return; g.lineTo(...at(e)); g.stroke(); };
   c.onpointerup=c.onpointercancel=()=>{ if(!drawing) return; drawing=false; signing=false; v.signature=c.toDataURL('image/png'); queueSave('visits',v); };
   $('#sigClear').onclick=()=>{ paper(); v.signature=''; queueSave('visits',v); };
+}
+
+/* ========== Reading a nameplate with AI ==========
+   The API key stays on the server, in the readNameplate Cloud Function. A reading
+   is only a suggestion: nothing reaches the form until the user has checked it
+   against the photo. */
+const AI_SLOTS={
+  pumpPlate:{kind:'pump',fields:['pumpBrand','pumpModel','pumpFlow','pumpHead']},
+  motorPlate:{kind:'motor',fields:['motorBrand','motorModel','rpm','pole','power','motorEff','ratedV','ratedA']}
+};
+const toB64 = b => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(r.error); r.readAsDataURL(b); });
+function aiMessage(e){
+  const c=String(e.code||'').replace('functions/','');
+  if(c==='not-found'||c==='internal') return 'The AI reader is not available right now. Please fill in the details by hand.';
+  if(c==='unavailable'||c==='deadline-exceeded'||!navigator.onLine) return 'Could not reach the AI reader. Check your signal and try again.';
+  if(c==='resource-exhausted') return 'The AI reader is busy. Try again in a minute.';
+  if(c==='permission-denied'||c==='unauthenticated') return 'Your account is not allowed to use the AI reader.';
+  return e.message||'The AI reader could not read this photo.';
+}
+async function readNameplate(slot){
+  const cfg=AI_SLOTS[slot], p=cur.pump;
+  if(!cfg||!p||cur.ro) return;
+  await flush();
+  $('#toast').hidden=true;
+  const o=sheet('<div class="spin"></div><h3 style="text-align:center">Reading the nameplate…</h3>');
+  const fail=m=>{
+    o.firstChild.innerHTML=`<h3>Could not read it</h3><p class="note">${esc(m)}</p><button class="btn" id="aiX">Close</button>`;
+    $('#aiX',o).onclick=()=>o.remove();
+  };
+  try{
+    /* the newest photos of this plate: more than one helps with glare or a long plate */
+    const list=cur.photos.filter(x=>x.slot===slot).slice(-3), images=[];
+    for(const ph of list){
+      const src=ph.blob||await (await fetch(ph.url)).blob();
+      images.push(await toB64((await shrink(src,1568,.85)).blob));
+    }
+    const res=await firebase.app().functions('asia-southeast1').httpsCallable('readNameplate',{timeout:120000})({kind:cfg.kind,images});
+    if(!o.isConnected) return;
+    const d=res.data||{}, found=cfg.fields.filter(k=>!blank(d[k]));
+    if(!found.length) return fail('Nothing could be read from this photo. Try a closer, straighter photo without glare, or fill in the details by hand.');
+    if(cur.pump!==p){ o.remove(); return; }
+    o.firstChild.innerHTML=`<h3>Check against the photo</h3>
+      <img class="aipic" src="${esc(urls.get(list[list.length-1].id))}" alt="${esc(SLOTS[slot].l)}">
+      <p class="note">The AI can misread a worn plate. Correct anything wrong, then apply.</p>
+      <div class="grid" style="margin-bottom:12px">${cfg.fields.map(k=>{
+        const was=p[k]??'', val=d[k]??'';
+        return `<div class="f"><label for="ai-${k}">${esc(F[k].l)}</label><input class="in" id="ai-${k}" data-aif="${k}" value="${esc(blank(val)?was:val)}" ${F[k].n?'inputmode="decimal"':''} autocomplete="off">${!blank(val)&&!blank(was)&&String(val)!==String(was)?`<div class="aiwas">Replaces ${esc(was)}</div>`:''}</div>`;
+      }).join('')}</div>
+      ${d.notes?`<p class="note" id="aiN" style="margin-bottom:12px">${esc(d.notes)}</p>`:''}
+      <button class="btn primary" id="aiApply">Apply to form</button>
+      <button class="btn ghost" id="aiX">Cancel</button>`;
+    $('#aiX',o).onclick=()=>o.remove();
+    $('#aiApply',o).onclick=()=>{
+      if(cur.pump===p&&!cur.ro){
+        o.querySelectorAll('[data-aif]').forEach(el=>{
+          const k=el.dataset.aif;
+          p[k]=el.value.trim();
+          const f=$('#f-'+k); if(f) f.value=p[k];
+        });
+        queueSave('pumps',p); refreshPump();
+      }
+      o.remove();
+    };
+  }catch(e){ console.warn(e); fail(aiMessage(e)); }
 }
 
 /* ========== Pump form ========== */
@@ -801,7 +1087,7 @@ function fieldHTML(k,p){
   if(d.seg) return `<div class="${cls}" data-show="${k}"${hide}><span class="lbl">${esc(d.l)}</span><div class="seg" role="group" aria-label="${esc(d.l)}">${
     d.seg.map(o=>`<button type="button" data-seg="${k}" data-val="${esc(o)}" aria-pressed="${val===o}">${esc(o)}</button>`).join('')}</div></div>`;
   if(d.area) return `<div class="${cls}" data-show="${k}"${hide}><label for="f-${k}">${esc(d.l)}</label><textarea class="in" id="f-${k}" data-k="${k}">${esc(val)}</textarea></div>`;
-  const inp=`<input class="in" id="f-${k}" data-k="${k}" value="${esc(val)}" ${d.n?'inputmode="decimal"':'autocapitalize="sentences"'} autocomplete="off">`;
+  const inp=`<input class="in" id="f-${k}" data-k="${k}" value="${esc(val)}" ${d.n?'inputmode="decimal"':'autocapitalize="sentences"'}${d.list?` list="${d.list}"`:''} autocomplete="off">`;
   return `<div class="${cls}" data-show="${k}"${hide}><label for="f-${k}">${esc(d.l)}</label>${
     d.signed?`<div class="withbtn">${inp}<button type="button" class="sign" data-sign="${k}" aria-label="Plus or minus">±</button></div>`:inp}</div>`;
 }
@@ -811,6 +1097,7 @@ function slotHTML(s,p,photos){
   return `<div class="slot" data-slot="${s}"${visible(d,p)?'':' hidden'}>
     <div class="top"><span>${esc(d.l)}</span>${mine.length?`<span class="got">${mine.length} photo${mine.length===1?'':'s'}</span>`:`<span class="${isKey(d,p)?'need':'opt'}">${isKey(d,p)?'Photo needed':''}</span>`}</div>
     <div class="thumbs">${mine.map(ph=>`<button type="button" data-view="${ph.id}" aria-label="View photo"><img src="${esc(urls.get(ph.id))}" alt="${esc(d.l)}"></button>`).join('')}</div>
+    ${AI_SLOTS[s]&&mine.length?`<button type="button" class="btn aibtn edit-only" data-ai="${s}">Read nameplate with AI</button>`:''}
     <div class="pick">
       <label>Take photo<input type="file" accept="image/*" capture="environment" data-add="${s}"></label>
       <label>Gallery<input type="file" accept="image/*" multiple data-add="${s}"></label>
@@ -855,17 +1142,21 @@ async function renderPump(id,step,my){
   const p=await get('pumps',id);
   if(!p||p.deleted){ location.replace('#/'); return; }
   const photos=await photosOf(id), siblings=await pumpsOf(p.visitId);
+  const visit=await get('visits',p.visitId), locs=new Set();
+  if(visit&&visit.projectId) for(const v of await visitsOf(visit.projectId)) for(const q of await pumpsOf(v.id)) if(!blank(q.location)) locs.add(q.location.trim());
   if(my!==routeToken) return;
   step=Math.min(Math.max(step,0),STEPS.length-1);
   const idx=siblings.findIndex(x=>x.id===id);
-  cur={pump:p,photos,idx};
+  cur={pump:p,photos,idx,projectId:visit&&visit.projectId};
+  const mayEdit=!!visit&&canEditVisit(visit);
   const st=STEPS[step];
   app.innerHTML=`
   <header>
     <div class="hrow"><button class="hback" aria-label="Back to visit" id="bk">‹</button><h1 id="ttl">${esc(pumpLabel(p,idx))}</h1><span class="saved" id="saved">Saved</span></div>
     <div class="tabs">${STEPS.map((s,i)=>`<button class="tab ${i===step?'on':''}" data-step="${i}">${s.tab}<span class="tick" id="tick${i}"></span></button>`).join('')}</div>
   </header>
-  <main>${st.groups.map(g=>`<div class="card"><h2>${esc(g.h)}</h2>
+  <datalist id="locs">${[...locs].map(l=>`<option value="${esc(l)}">`).join('')}</datalist>
+  <main>${mayEdit?'':`<div class="viewonly">View only. This visit can be changed by ${esc(nameOf(visit?conductorOf(visit):''))}, an EO coordinator or an admin.</div>`}${st.groups.map(g=>`<div class="card"><h2>${esc(g.h)}</h2>
     ${g.fields?`<div class="grid">${g.fields.map(k=>fieldHTML(k,p)).join('')}${g.avg?'<div class="f full"><span class="lbl">Motor Amp Measured (average)</span><div class="readout" id="avg">—</div></div>':''}</div>`:''}
     ${g.check?'<div class="check" id="check"></div>':''}
     ${g.missing?'<div id="missing"></div>':''}
@@ -875,6 +1166,7 @@ async function renderPump(id,step,my){
     <button class="btn ghost" id="prev">${step?'Back':'Visit'}</button>
     <button class="btn primary" id="next">${step<STEPS.length-1?'Next: '+STEPS[step+1].tab:'Done'}</button>
   </div></div>`;
+  setRO(!mayEdit);
   refreshPump();
   const toStep=i=>location.replace('#/p/'+id+'/'+i);
   const toVisit=()=>go('#/v/'+p.visitId);
@@ -893,7 +1185,7 @@ app.addEventListener('input',e=>{
 });
 app.addEventListener('click',e=>{
   const seg=e.target.closest('[data-seg]');
-  if(seg&&cur.pump){
+  if(seg&&cur.pump&&!cur.ro){
     const k=seg.dataset.seg, on=cur.pump[k]===seg.dataset.val;
     cur.pump[k]=on?'':seg.dataset.val;
     seg.parentElement.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',b===seg&&!on));
@@ -901,12 +1193,14 @@ app.addEventListener('click',e=>{
     return;
   }
   const sg=e.target.closest('[data-sign]');
-  if(sg&&cur.pump){
+  if(sg&&cur.pump&&!cur.ro){
     const k=sg.dataset.sign, inp=$('#f-'+k), v=inp.value.trim();
     inp.value=v.startsWith('-')?v.slice(1):'-'+v;
     cur.pump[k]=inp.value; queueSave('pumps',cur.pump); refreshPump(); inp.focus();
     return;
   }
+  const ai=e.target.closest('[data-ai]');
+  if(ai) return void readNameplate(ai.dataset.ai);
   const vw=e.target.closest('[data-view]');
   if(vw) viewPhoto(vw.dataset.view);
 });
@@ -930,6 +1224,11 @@ app.addEventListener('change',async e=>{
   if(cur.pump===p){ redrawSlot(s); refreshPump(); }
   scheduleSync(0);
   toast(n===1?'Photo saved':n+' photos saved');
+  /* a new plate photo goes straight to the reader; with no signal the button stays for later */
+  if(AI_SLOTS[s]&&cur.pump===p&&!cur.ro){
+    if(online) readNameplate(s);
+    else toast('Photo saved. Tap Read nameplate when you have signal.');
+  }
 });
 function redrawSlot(s){
   const el=app.querySelector(`[data-slot="${s}"]`);
@@ -951,7 +1250,7 @@ async function shrink(fileOrBlob,edge,q){
 function viewPhoto(id){
   const ph=cur.photos.find(x=>x.id===id); if(!ph) return;
   const o=document.createElement('div'); o.className='overlay';
-  const mayDel=me.isAdmin||ph.by===me.uid;
+  const mayDel=!cur.ro;
   o.innerHTML=`<div class="cap">${esc(SLOTS[ph.slot].l)}${ph.byName?` · ${esc(ph.byName)}`:''}</div><div class="pic"><img src="${esc(urls.get(id))}" alt="Photo not available offline"></div>
     <div class="acts">${mayDel?'<button class="btn danger" id="pd">Delete</button>':'<span></span>'}<button class="btn" id="pc">Close</button></div>`;
   document.body.append(o);
@@ -1085,11 +1384,11 @@ async function drawPhotos(doc,v,p,label,photos){
     doc.text(pdfText(SLOTS[ph.slot].l),x,y+chh+4);
   }
 }
-async function buildPDF(v,pumps,progress){
+async function buildPDF(list,progress){
   const doc=new jspdf.jsPDF({unit:'mm',format:'a4',compress:true});
-  for(let i=0;i<pumps.length;i++){
-    const {p,photos}=pumps[i], label=pumpLabel(p,i);
-    progress(`Building PDF: ${label} (${i+1} of ${pumps.length})`);
+  for(let i=0;i<list.length;i++){
+    const {p,photos,v,label}=list[i];
+    progress(`Building PDF: ${label} (${i+1} of ${list.length})`);
     if(i) doc.addPage();
     const rest=drawForm(doc,v,p);
     if(rest.length){
@@ -1104,17 +1403,18 @@ async function buildPDF(v,pumps,progress){
   return doc.output('blob');
 }
 
-/* ========== Export & restore ========== */
+/* ========== Export ========== */
 const safe = s => String(s||'').replace(/[\\/:*?"<>|\x00-\x1f]/g,' ').replace(/\s+/g,' ').trim().slice(0,70)||'Unnamed';
-async function buildZIP(v,pumps,pdf,base){
-  const zip=new JSZip(), used=new Set(), data={app:'energy-check',version:1,visit:v,pumps:[]};
+async function buildZIP(j,visits,list,pdf,base,byDate){
+  const zip=new JSZip(), used=new Set();
+  const data={app:'energy-check',version:2,project:j,visits:visits.map(({signature,...v})=>v),pumps:[]};
   zip.file(base+'.pdf',pdf);
-  for(let i=0;i<pumps.length;i++){
-    const {p,photos}=pumps[i];
-    let dir=safe(pumpLabel(p,i)), n=2; const root=dir;
+  for(const {p,photos,v,label} of list){
+    const root=(byDate?safe(v.date||'No date')+'/':'')+safe(label);
+    let dir=root, n=2;
     while(used.has(dir.toLowerCase())) dir=`${root} (${n++})`;
     used.add(dir.toLowerCase());
-    const counts={}, rec={fields:{},calculated:calc(p),photos:[]};
+    const counts={}, rec={visitId:p.visitId,visitDate:v.date||'',fields:{},calculated:calc(p),photos:[]};
     for(const k in F) rec.fields[k]=visible(F[k],p)?(p[k]??''):'';
     for(const ph of photos){
       counts[ph.slot]=(counts[ph.slot]||0)+1;
@@ -1134,18 +1434,26 @@ function sheet(html){
   return o;
 }
 const mb = b => (b.size/1048576).toFixed(1)+' MB';
-async function exportVisit(id){
+async function exportVisits(projectId,visitIds,wholeProject){
   await flush();
   const o=sheet('<div class="spin"></div><h3 id="prog" style="text-align:center">Preparing…</h3>');
   const progress=m=>{ const el=$('#prog',o); if(el) el.textContent=m; };
   try{
-    const v=await get('visits',id), list=[];
+    const j=await get('projects',projectId), list=[], visits=[], miss=[];
     let lost=0, n=0, total=0;
-    const pumps=await pumpsOf(id);
-    for(const p of pumps) total+=(await photosOf(p.id)).length;
-    for(const p of pumps){
-      const photos=[];
-      for(const ph of await photosOf(p.id)){
+    /* the form prints customer and project together in its Company Name box */
+    const company=[(j.company||'').trim(),(j.name||'').trim()].filter(Boolean).join(' — ');
+    const work=[];
+    for(const id of visitIds){
+      const v=await get('visits',id), pumps=await pumpsOf(id);
+      visits.push(v);
+      pumps.forEach((p,i)=>work.push({p,v:{...v,company,tariff:j.tariff},label:pumpLabel(p,i)}));
+    }
+    work.sort((a,b)=>String(a.v.date||'').localeCompare(String(b.v.date||'')));
+    for(const w of work) total+=(await photosOf(w.p.id)).length;
+    for(const w of work){
+      const photos=[], stored=await photosOf(w.p.id);
+      for(const ph of stored){
         progress(`Getting photos (${++n} of ${total})`);
         if(!ph.blob){
           try{ const r=await fetch(ph.url); if(!r.ok) throw new Error(r.status); ph.blob=await r.blob(); }
@@ -1153,17 +1461,18 @@ async function exportVisit(id){
         }
         photos.push(ph);
       }
-      list.push({p,photos});
+      list.push({...w,photos});
+      const m=missing(w.p,stored).length;
+      if(m) miss.push({l:w.label,n:m});
     }
-    const base=safe(`Energy Check - ${v.company||'Site'} - ${v.date||today()}`);
-    const pdf=await buildPDF(v,list,progress);
+    const when=wholeProject?'':' - '+(visits[0].date||today());
+    const base=safe(`Energy Check - ${company||'Site'}${when}`);
+    const pdf=await buildPDF(list,progress);
     progress('Packing photos…');
-    const zip=await buildZIP(v,list,pdf,base);
+    const zip=await buildZIP(j,visits,list,pdf,base,wholeProject);
     const pdfF=new File([pdf],base+'.pdf',{type:'application/pdf'});
     const zipF=new File([zip],base+'.zip',{type:'application/zip'});
     const can=f=>{ try{ return !!(navigator.canShare&&navigator.canShare({files:[f]})); }catch(_){ return false; } };
-    const miss=[];
-    for(let i=0;i<pumps.length;i++){ const m=missing(pumps[i],await photosOf(pumps[i].id)).length; if(m) miss.push({l:pumpLabel(pumps[i],i),n:m}); }
     /* The share call needs a fresh tap, so it cannot run straight after the slow build. */
     o.firstChild.innerHTML=`<h3>Export ready</h3>
       ${lost?`<p class="note" style="color:#ff8a9d">${lost} photo${lost===1?' is':'s are'} left out because ${lost===1?'it':'they'} could not be downloaded. Export again with signal to include ${lost===1?'it':'them'}.</p>`:''}

@@ -1,7 +1,7 @@
 /* Offline support: serve from cache immediately, refresh the cache in the
    background, so a phone with no signal still opens the app and the next
    load with signal picks up any new version. */
-const CACHE = 'energy-check-v2';
+const CACHE = 'energy-check-v5';
 const ASSETS = [
   './',
   './index.html',
@@ -12,6 +12,7 @@ const ASSETS = [
   './vendor/firebase-auth-compat.js',
   './vendor/firebase-database-compat.js',
   './vendor/firebase-storage-compat.js',
+  './vendor/firebase-functions-compat.js',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];

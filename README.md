@@ -6,14 +6,18 @@ Based on the paper "Energy Check - Site Data Collection Form".
 ## How it works
 
 - Every user signs in with their **Project Management login**. All approved users see and edit the same visits.
-- One **site visit** holds many **pumps**. Each pump has five tabs: Pump, Motor, Electrical, System, Notes.
+- **Customer → Project → Visit → Pump.** The home screen groups projects by customer. A project holds visits on different days, and also lists its pumps by location. Each pump has five tabs: Pump, Motor, Electrical, System, Notes.
 - Works with no signal once signed in. Everything saves to the phone first, then syncs when there is signal. The status at the top shows Synced, Syncing or Offline with a waiting count.
-- **Export** gives a PDF (the form plus photo pages) and a ZIP (PDF, full-size photos in a folder per pump, `data.json`).
+- **Export** works for one visit or a whole project. It gives a PDF (the form plus photo pages) and a ZIP (PDF, full-size photos in a folder per pump, `data.json`).
 
 ## Accounts
 
 - New accounts start with no access. An admin gives them a role in Project Management, under Users. Any role allows Energy Check.
-- Anyone approved can edit anything. Deleting is limited to whoever created the record, or an admin.
+- Everyone approved can view and export everything, start a project and start their own visit.
+- A visit, with its pumps and photos, can only be changed or deleted by an **admin**, an **EO Coordinator** or the **person conducting it**.
+- Whoever starts a visit conducts it. Only an admin or EO Coordinator can change the conductor.
+- Project details can be changed by an admin, an EO Coordinator or the project's creator.
+- `database.rules.json` enforces this on the server. Photo files in Storage only check for a signed-in user, because Storage rules cannot read the database. The app checks this before uploading.
 
 ## Where data lives
 
@@ -21,7 +25,7 @@ Firebase project `iht-project-schedule`, shared with Project Management:
 
 | What | Where |
 |---|---|
-| Visits, pumps, photo records | Realtime Database `pm/energyCheck/{visits,pumps,photos}` |
+| Visits, pumps, photo records | Realtime Database `pm/energyCheck/{projects,visits,pumps,photos}` |
 | Photos | Storage `pm/energyCheck/{visitId}/{photoId}.jpg` |
 | Users and roles | `pm/users` (Project Management's table) |
 
@@ -34,9 +38,14 @@ Rules are in the Project Management repo: `database.rules.json` and `storage.rul
 ## How sync behaves
 
 - Only changed fields are sent, so two people editing different fields of a pump both keep their work. If both change the same field, the last to sync wins.
+- Visits made before projects existed move automatically into one project per customer, with the id `legacy-<customer>`.
 - Deletes leave a `deleted: true` marker, so a phone that was offline cannot bring the record back.
 - Uploaded photos stay on the phone for 30 days, then load from the cloud when viewed.
 - Signing out clears the phone, and is refused while anything is waiting to sync.
+
+## Reading nameplates with AI
+
+A new pump or motor plate photo goes to the `readNameplate` Cloud Function, in the Project Management repo. It uses Claude and the API key in Secret Manager, so the key never reaches the phone. The reading opens beside the photo to be corrected, and nothing reaches the form until **Apply**. With no signal the photo is kept and **Read nameplate with AI** can be tapped later.
 
 ## Photos required
 
@@ -70,3 +79,4 @@ missing list. `drawForm` lays out the PDF. Add new files to `ASSETS` in `sw.js`.
 - Photos taken by other users load from the cloud, so they cannot be viewed with no signal.
 - Until a phone syncs, its work exists only on that phone. iPhone Safari can clear data for a site not used for 7 days unless it is added to the Home Screen.
 - `vendor/` holds jsPDF 2.5.2, JSZip 3.10.1 and Firebase 10.14.1 so that the app opens offline.
+- The AI reader needs signal.
