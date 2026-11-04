@@ -5,12 +5,38 @@ Based on the paper "Energy Check - Site Data Collection Form".
 
 ## How it works
 
+- Every user signs in with their **Project Management login**. All approved users see and edit the same visits.
 - One **site visit** holds many **pumps**. Each pump has five tabs: Pump, Motor, Electrical, System, Notes.
-- Works with no signal once it has been opened online. Everything autosaves to the phone.
+- Works with no signal once signed in. Everything saves to the phone first, then syncs when there is signal. The status at the top shows Synced, Syncing or Offline with a waiting count.
 - **Export** gives a PDF (the form plus photo pages) and a ZIP (PDF, full-size photos in a folder per pump, `data.json`).
-- **Restore a visit from ZIP** on the home screen brings an exported visit back onto any phone.
 
-There is no login and no server. Data leaves the phone only when the user exports it.
+## Accounts
+
+- New accounts start with no access. An admin gives them a role in Project Management, under Users. Any role allows Energy Check.
+- Anyone approved can edit anything. Deleting is limited to whoever created the record, or an admin.
+
+## Where data lives
+
+Firebase project `iht-project-schedule`, shared with Project Management:
+
+| What | Where |
+|---|---|
+| Visits, pumps, photo records | Realtime Database `pm/energyCheck/{visits,pumps,photos}` |
+| Photos | Storage `pm/energyCheck/{visitId}/{photoId}.jpg` |
+| Users and roles | `pm/users` (Project Management's table) |
+
+Rules are in the Project Management repo: `database.rules.json` and `storage.rules`. Deploy from there:
+
+```bash
+./tooling/node_modules/.bin/firebase deploy --only database,storage --project iht-project-schedule
+```
+
+## How sync behaves
+
+- Only changed fields are sent, so two people editing different fields of a pump both keep their work. If both change the same field, the last to sync wins.
+- Deletes leave a `deleted: true` marker, so a phone that was offline cannot bring the record back.
+- Uploaded photos stay on the phone for 30 days, then load from the cloud when viewed.
+- Signing out clears the phone, and is refused while anything is waiting to sync.
 
 ## Photos required
 
@@ -40,5 +66,7 @@ missing list. `drawForm` lays out the PDF. Add new files to `ASSETS` in `sw.js`.
 
 ## Limits
 
-- iPhone Safari can clear data for a site not used for 7 days unless it is added to the Home Screen. Export when each visit is done.
-- `vendor/` holds jsPDF 2.5.2 and JSZip 3.10.1 so that export works offline.
+- First sign-in on a phone needs signal.
+- Photos taken by other users load from the cloud, so they cannot be viewed with no signal.
+- Until a phone syncs, its work exists only on that phone. iPhone Safari can clear data for a site not used for 7 days unless it is added to the Home Screen.
+- `vendor/` holds jsPDF 2.5.2, JSZip 3.10.1 and Firebase 10.14.1 so that the app opens offline.
