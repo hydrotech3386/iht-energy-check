@@ -1070,7 +1070,7 @@ const AI_SLOTS={
   pumpPlate:{kind:'pump',fields:['pumpBrand','pumpModel','pumpFlow','pumpHead']},
   motorPlate:{kind:'motor',fields:['motorBrand','motorModel','rpm','pole','power','motorEff','ratedV','ratedA']}
 };
-/* The scanner sits above the fields of its tab, and only photos taken through it are
+/* The scanner sits directly above its nameplate section, and only photos taken through it are
    read. The Take photo and Gallery buttons in the plate section just add extra photos. */
 function scannerHTML(slot,photos){
   const n=photos.filter(x=>x.slot===slot&&x.scan).length, what=AI_SLOTS[slot].kind;
@@ -1216,7 +1216,7 @@ async function renderPump(id,step,my){
     <div class="tabs">${STEPS.map((s,i)=>`<button class="tab ${i===step?'on':''}" data-step="${i}">${s.tab}<span class="tick" id="tick${i}"></span></button>`).join('')}</div>
   </header>
   <datalist id="locs">${[...locs].map(l=>`<option value="${esc(l)}">`).join('')}</datalist>
-  <main>${mayEdit?'':`<div class="viewonly">View only. This visit can be changed by ${esc(nameOf(visit?conductorOf(visit):''))}, an EO coordinator or an admin.</div>`}${scanSlot?scannerHTML(scanSlot,photos):''}${st.groups.map(g=>`<div class="card"><h2>${esc(g.h)}</h2>
+  <main>${mayEdit?'':`<div class="viewonly">View only. This visit can be changed by ${esc(nameOf(visit?conductorOf(visit):''))}, an EO coordinator or an admin.</div>`}${st.groups.map(g=>`${(g.slots||[]).includes(scanSlot)?scannerHTML(scanSlot,photos):''}<div class="card"><h2>${esc(g.h)}</h2>
     ${g.fields?`<div class="grid">${g.fields.map(k=>fieldHTML(k,p)).join('')}${g.avg?'<div class="f full"><span class="lbl">Motor Amp Measured (average)</span><div class="readout" id="avg">—</div></div>':''}</div>`:''}
     ${g.check?'<div class="check" id="check"></div>':''}
     ${g.missing?'<div id="missing"></div>':''}
