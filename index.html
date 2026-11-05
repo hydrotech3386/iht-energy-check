@@ -1070,6 +1070,17 @@ const AI_SLOTS={
   pumpPlate:{kind:'pump',fields:['pumpBrand','pumpModel','pumpFlow','pumpHead']},
   motorPlate:{kind:'motor',fields:['motorBrand','motorModel','rpm','pole','power','motorEff','ratedV','ratedA']}
 };
+/* The scanner sits above the fields of its tab, and only photos taken through it are
+   read. The Take photo and Gallery buttons in the plate section just add extra photos. */
+function scannerHTML(slot,photos){
+  const n=photos.filter(x=>x.slot===slot&&x.scan).length, what=AI_SLOTS[slot].kind;
+  return `<div class="card edit-only" id="scanner"><h2>AI nameplate scanner</h2>
+    <label class="btn primary">Scan ${what} nameplate<input type="file" accept="image/*" capture="environment" data-add="${slot}" data-scan="1"></label>
+    <label class="btn ghost">Scan from gallery<input type="file" accept="image/*" multiple data-add="${slot}" data-scan="1"></label>
+    ${n?`<button type="button" class="btn aibtn" data-ai="${slot}" style="margin:8px 0 0">Read scanned photo${n===1?'':'s'} again</button>`:''}
+    <p class="note" style="margin-top:10px">Fills in the ${what} details for you to check. Needs signal. With none, the scan is saved so you can read it later. To add a photo without scanning, use the buttons under ${what==='pump'?'Pump':'Motor'} plate below.</p>
+  </div>`;
+}
 const toB64 = b => new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=()=>rej(r.error); r.readAsDataURL(b); });
 function aiMessage(e){
   const c=String(e.code||'').replace('functions/','');
@@ -1090,8 +1101,8 @@ async function readNameplate(slot){
     $('#aiX',o).onclick=()=>o.remove();
   };
   try{
-    /* the newest photos of this plate: more than one helps with glare or a long plate */
-    const list=cur.photos.filter(x=>x.slot===slot).slice(-3), images=[];
+    /* the newest scans of this plate: more than one helps with glare or a long plate */
+    const list=cur.photos.filter(x=>x.slot===slot&&x.scan).slice(-3), images=[];
     for(const ph of list){
       const src=ph.blob||await (await fetch(ph.url)).blob();
       images.push(await toB64((await shrink(src,1568,.85)).blob));
@@ -1145,7 +1156,6 @@ function slotHTML(s,p,photos){
   return `<div class="slot" data-slot="${s}"${visible(d,p)?'':' hidden'}>
     <div class="top"><span>${esc(d.l)}</span>${mine.length?`<span class="got">${mine.length} photo${mine.length===1?'':'s'}</span>`:`<span class="${isKey(d,p)?'need':'opt'}">${isKey(d,p)?'Photo needed':''}</span>`}</div>
     <div class="thumbs">${mine.map(ph=>`<button type="button" data-view="${ph.id}" aria-label="View photo"><img src="${esc(urls.get(ph.id))}" alt="${esc(d.l)}"></button>`).join('')}</div>
-    ${AI_SLOTS[s]&&mine.length?`<button type="button" class="btn aibtn edit-only" data-ai="${s}">Read nameplate with AI</button>`:''}
     <div class="pick">
       <label>Take photo<input type="file" accept="image/*" capture="environment" data-add="${s}"></label>
       <label>Gallery<input type="file" accept="image/*" multiple data-add="${s}"></label>
@@ -1199,13 +1209,14 @@ async function renderPump(id,step,my){
   cur={pump:p,photos,idx,projectId:visit&&visit.projectId,visitDate:visit&&visit.date};
   const mayEdit=!!visit&&canEditVisit(visit);
   const st=STEPS[step];
+  const scanSlot=st.groups.flatMap(g=>g.slots||[]).find(x=>AI_SLOTS[x]);
   app.innerHTML=`
   <header>
     <div class="hrow"><button class="hback" aria-label="Back to visit" id="bk">‹</button><h1 id="ttl">${esc(pumpLabel(p,idx))}</h1><span class="saved" id="saved">Saved</span></div>
     <div class="tabs">${STEPS.map((s,i)=>`<button class="tab ${i===step?'on':''}" data-step="${i}">${s.tab}<span class="tick" id="tick${i}"></span></button>`).join('')}</div>
   </header>
   <datalist id="locs">${[...locs].map(l=>`<option value="${esc(l)}">`).join('')}</datalist>
-  <main>${mayEdit?'':`<div class="viewonly">View only. This visit can be changed by ${esc(nameOf(visit?conductorOf(visit):''))}, an EO coordinator or an admin.</div>`}${st.groups.map(g=>`<div class="card"><h2>${esc(g.h)}</h2>
+  <main>${mayEdit?'':`<div class="viewonly">View only. This visit can be changed by ${esc(nameOf(visit?conductorOf(visit):''))}, an EO coordinator or an admin.</div>`}${scanSlot?scannerHTML(scanSlot,photos):''}${st.groups.map(g=>`<div class="card"><h2>${esc(g.h)}</h2>
     ${g.fields?`<div class="grid">${g.fields.map(k=>fieldHTML(k,p)).join('')}${g.avg?'<div class="f full"><span class="lbl">Motor Amp Measured (average)</span><div class="readout" id="avg">—</div></div>':''}</div>`:''}
     ${g.check?'<div class="check" id="check"></div>':''}
     ${g.missing?'<div id="missing"></div>':''}
@@ -1255,7 +1266,7 @@ app.addEventListener('click',e=>{
 });
 app.addEventListener('change',async e=>{
   const s=e.target.dataset.add; if(!s||!cur.pump) return;
-  const files=[...e.target.files], p=cur.pump;
+  const files=[...e.target.files], p=cur.pump, scan=!!e.target.dataset.scan;
   e.target.value='';
   await flush();
   let n=0;
@@ -1264,6 +1275,7 @@ app.addEventListener('change',async e=>{
     try{
       const {blob,w,h}=await shrink(file,2000,.82);
       const ph={id:uid(),pumpId:p.id,visitId:p.visitId,slot:s,blob,w,h,by:me.uid,byName:me.name||me.email,createdAt:Date.now()};
+      if(scan) ph.scan=true;
       await put('photos',ph);
       if(cur.pump===p) cur.photos.push(ph);
       n++;
@@ -1273,15 +1285,17 @@ app.addEventListener('change',async e=>{
   if(cur.pump===p){ redrawSlot(s); refreshPump(); }
   scheduleSync(0);
   toast(n===1?'Photo saved':n+' photos saved');
-  /* a new plate photo goes straight to the reader; with no signal the button stays for later */
-  if(AI_SLOTS[s]&&cur.pump===p&&!cur.ro){
+  /* a scan goes straight to the reader; with no signal the button stays for later */
+  if(scan&&AI_SLOTS[s]&&cur.pump===p&&!cur.ro){
     if(online) readNameplate(s);
-    else toast('Photo saved. Tap Read nameplate when you have signal.');
+    else toast('Photo saved. Tap Read scanned photo again when you have signal.');
   }
 });
 function redrawSlot(s){
   const el=app.querySelector(`[data-slot="${s}"]`);
   if(el) el.outerHTML=slotHTML(s,cur.pump,cur.photos);
+  const sc=$('#scanner');
+  if(sc&&AI_SLOTS[s]&&sc.querySelector(`[data-add="${s}"]`)) sc.outerHTML=scannerHTML(s,cur.photos);
 }
 async function shrink(fileOrBlob,edge,q){
   const url=URL.createObjectURL(fileOrBlob);

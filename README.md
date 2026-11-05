@@ -45,7 +45,7 @@ Rules are in the Project Management repo: `database.rules.json` and `storage.rul
 
 ## Reading nameplates with AI
 
-A new pump or motor plate photo goes to the `readNameplate` Cloud Function, in the Project Management repo. It uses Claude and the API key in Secret Manager, so the key never reaches the phone. The reading opens beside the photo to be corrected, and nothing reaches the form until **Apply**. With no signal the photo is kept and **Read nameplate with AI** can be tapped later.
+The **AI nameplate scanner** card sits at the top of the Pump and Motor tabs. Only photos taken through it are read; the buttons in the plate section just add extra photos. A scan goes to the `readNameplate` Cloud Function, in the Project Management repo. It uses Claude and the API key in Secret Manager, so the key never reaches the phone. The reading opens beside the photo to be corrected, and nothing reaches the form until **Apply**. With no signal the photo is kept and **Read scanned photo again** can be tapped later.
 
 ## Photos required
 
